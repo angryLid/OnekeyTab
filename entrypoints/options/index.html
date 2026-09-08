@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AI Tab Grouper — Settings</title>
+  </head>
+  <body>
+    <main>
+      <h1>AI Tab Grouper</h1>
+
+      <section>
+        <h2>OpenRouter API Key</h2>
+        <p>
+          Get a key at
+          <a href="https://openrouter.ai/settings/keys" target="_blank" rel="noreferrer">openrouter.ai/settings/keys</a>.
+        </p>
+        <label for="api-key">API key</label>
+        <input id="api-key" type="password" autocomplete="off" placeholder="sk-or-..." />
+        <button id="save" type="button">Save &amp; Verify</button>
+        <p id="status" role="status"></p>
+      </section>
+
+      <section id="error-section" hidden>
+        <h2>Last run error</h2>
+        <p id="last-error" class="error"></p>
+        <p id="last-error-time" class="muted"></p>
+      </section>
+
+      <section>
+        <h2>Privacy</h2>
+        <p>
+          When you click the toolbar icon, tab titles and URLs (origin and path only — no query
+          parameters) are sent to OpenRouter for grouping. OpenRouter does not log prompts or
+          completions by default.
+        </p>
+      </section>
+
+      <section>
+        <h2>Security note</h2>
+        <p>
+          Your API key is stored in plaintext in this browser's local extension storage. This is
+          demo-grade storage — do not reuse a production key.
+        </p>
+      </section>
+    </main>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>
