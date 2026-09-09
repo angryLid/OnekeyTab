@@ -1,0 +1,127 @@
+# Vivaldi Compatibility Research
+
+Research notes on running this extension (AI Tab Grouper) in Vivaldi 8.x
+(Chromium-based). Written after observing a discrepancy between extension
+logs and the actual browser UI: logs showed many tabs carrying a `groupId`,
+but the tab strip displayed no groups at all.
+
+## TL;DR
+
+- The extension works in Vivaldi at the API/data level; nothing crashes or
+  silently fails.
+- Vivaldi replaces Chromium's native tab strip with its own UI and does not
+  render native tab group visuals (colored capsules, collapse headers).
+- Vivaldi's own replacement feature, Tab Stacks, has no public extension
+  API, so an extension cannot create or control stacks.
+- Best achievable adaptation: full data-layer support (100%), zero native
+  visual support (0%). Workaround is to show grouping results in the
+  extension's own UI (side panel), optionally paired with a user-installed
+  Vivaldi UI mod that mirrors native groups into Tab Stacks.
+
+## Architecture: why the API works but the UI shows nothing
+
+Chromium separates tab management into layers:
+
+```
++---------------------------------------------+
+|  UI layer (draws group capsules, headers)   | <- Vivaldi replaces this;
+|                                             |    does not draw groups
++---------------------------------------------+
+|  TabStripModel (data model)                 | <- groupId really lives
+|                                             |    here; read/write works
++---------------------------------------------+
+|  Extensions API (chrome.tabs/tabGroups)     | <- operates purely on the
+|                                             |    data model
++---------------------------------------------+
+```
+
+`chrome.tabs.group()` / `chrome.tabGroups.*` operate on the TabStripModel.
+In Vivaldi these calls succeed, the groupId persists, and group semantics
+(move/close behavior) follow Chromium rules. What is missing is only the
+projection of that model into visuals, because Vivaldi draws its own tab
+bar to support Tab Stacks, Two-Level Tab Bars, and Tab Tiling.
+
+This is not a wild-pointer situation: reads and writes are consistent and
+reliable. The closest analogy is headless Chrome or a backend API whose
+data never gets a frontend page.
+
+Vivaldi is technically compliant: the extension API contract promises data
+model changes, never a specific UI. Known community threads on this:
+
+- https://forum.vivaldi.net/topic/108502/vivaldi-does-not-recognize-chrome-tabgroups
+- https://forum.vivaldi.net/topic/81398/can-we-have-normal-tab-groups-like-the-other-chromium-browsers-such-as-brave-chrome
+
+## Evidence from our own logs
+
+- Selection snapshot (ts 1788957243849) captured the pre-grouping state;
+  the model response (run ts 1788957243835, response at ...3855) then
+  produced valid groups ("邮箱", "编程研究") using only real tab ids.
+- Even a `vivaldi://policy/` tab received a groupId, proving
+  `chrome.tabs.group()` works for any tab — the divergence is purely in
+  the rendering layer, not the API layer.
+- Caveat: persistence across restart is a separate risk. Vivaldi saves
+  sessions in its own format; whether native groupIds survive a restart
+  has been reported as unreliable on the forums. Untested by us.
+
+## Tab Stacks: no API, dead end for extensions
+
+Tab Stacks (and Workspaces) are not exposed to extensions at all. Feature
+requests exist but nothing has shipped:
+
+- https://forum.vivaldi.net/topic/113989/api-for-activating-expanding-tab-groups-programmatically
+
+So an extension cannot create, name, collapse, or expand a stack. This is
+a hard wall as of Vivaldi 8.x.
+
+## Escape hatch: Vivaldi UI Modifications (user-side mod)
+
+Vivaldi tolerates UI modding:
+
+1. User enables `vivaldi://experiments` -> "Allow UI Modifications".
+2. User drops a `.js`/`.css` file into the profile's `User Files`
+   directory and restarts.
+3. The mod runs inside the browser UI process, where it can access BOTH
+   `chrome.tabs.*` / `chrome.tabGroups.*` (the same data model the
+   extension writes to) AND Vivaldi's internal tab bar components,
+   including stack operations (undocumented, reverse-engineered by the
+   mod community; may break on major Vivaldi updates).
+
+Key design insight: the extension and the mod need no private channel —
+the native groupId itself is the interface. The extension writes groups
+via the standard API; the mod watches for groupId changes and mirrors
+them as Tab Stacks. Existing community mods (auto-stack / TidyTabs-style)
+may already do this:
+
+- https://github.com/PaRr0tBoY/Awesome-Vivaldi (mod docs, e.g. TidyTabs)
+
+Limitations to document for users: manual install, no store distribution,
+no compatibility guarantee across Vivaldi versions, and the mod's
+reliability becomes the perceived reliability of our grouping feature.
+
+## Recommended adaptation strategy
+
+1. Detect Vivaldi at runtime (e.g. `navigator.userAgentData.brands`
+   containing "Vivaldi").
+2. On Vivaldi, keep grouping functional but stop expecting visuals:
+   render the grouping result in the extension's own UI (side panel with
+   clickable per-group tab lists) so users see what the AI decided.
+3. Optionally skip `chrome.tabs.group()` on Vivaldi if the invisible
+   grouping causes confusion; decide based on whether group semantics
+   (persistence, ordering) still add value for the user.
+4. In the options page / docs, tell Vivaldi users about the UI
+   Modifications route for real tab-strip stacks.
+5. Add post-grouping verification logging (re-query
+   `chrome.tabs.query` and record final groupIds) to distinguish
+   "model returned nothing" / "group call failed" / "call succeeded but
+   UI does not show it" — this confusion is exactly what triggered this
+   investigation.
+
+## Summary table
+
+| Layer | Status in Vivaldi 8.x |
+|---|---|
+| `chrome.tabs.group()` and data model | Works, reliable |
+| Native tab group UI rendering | Not rendered (by design) |
+| Tab Stacks extension API | Does not exist |
+| UI Modifications mod bridge | Possible, user-installed, unofficial |
+| Native group persistence across restart | Unverified, forum reports of loss |
