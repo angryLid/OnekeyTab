@@ -3,10 +3,12 @@ import { clearBadge, setError, setPending, setSkip, reconcileOnStartup } from '@
 import { clearLastError, getConfig, setLastError } from '@/lib/config';
 import { LIMITS } from '@/lib/constants';
 import { chatCompletion } from '@/lib/llm';
+import { newRunId, recordRun } from '@/lib/logger';
 import { toModelTabs } from '@/lib/model-input';
 import { parsePlan } from '@/lib/parse-groups';
 import { buildMessages, buildRetryMessages } from '@/lib/prompt';
 import { selectCandidates } from '@/lib/selection';
+import type { RunCall, RunRecord } from '@/lib/types';
 
 const LOG_PREFIX = '[ai-tab-grouper]';
 
@@ -22,14 +24,27 @@ export default defineBackground(() => {
   async function run(windowId: number): Promise<void> {
     if (inFlight) return;
 
+    const startedAt = Date.now();
+    const record: RunRecord = {
+      id: newRunId(startedAt),
+      ts: startedAt,
+      outcome: 'success',
+      durationMs: 0,
+      windowId,
+    };
+
     const config = await getConfig();
     if (!config?.apiKey) {
+      // No-key runs are recorded too (outcome + reason, no payload), so "clicked
+      // but nothing happened" is diagnosable from the log.
+      record.outcome = 'error';
+      record.reason = 'No API key configured.';
+      await persist(record, startedAt);
       await browser.runtime.openOptionsPage();
       return;
     }
 
     inFlight = true;
-    const startedAt = Date.now();
     await setPending();
     try {
       const tabs = await browser.tabs.query({ windowId });
@@ -37,15 +52,28 @@ export default defineBackground(() => {
       console.log(`${LOG_PREFIX} ${candidates.length} candidate tabs in window ${windowId}`);
       if (candidates.length < LIMITS.minCandidates) {
         console.log(`${LOG_PREFIX} Skipped: fewer than ${LIMITS.minCandidates} candidates`);
+        record.outcome = 'skip';
+        record.reason = `Fewer than ${LIMITS.minCandidates} candidate tabs`;
         await setSkip();
         return;
       }
 
       const modelTabs = toModelTabs(candidates);
       const messages = buildMessages(modelTabs);
+      record.tabCount = modelTabs.length;
       console.log(`${LOG_PREFIX} Requesting grouping plan for ${modelTabs.length} tabs`);
 
+      const calls: RunCall[] = [];
+      const firstStartedAt = Date.now();
       const first = await chatCompletion(config.apiKey, { messages });
+      calls.push({
+        ts: firstStartedAt,
+        durationMs: Date.now() - firstStartedAt,
+        model: first.model,
+        request: messages,
+        response: first.content,
+      });
+      record.calls = calls;
       console.log(`${LOG_PREFIX} Model ${first.model} responded in ${Date.now() - startedAt}ms`);
       console.log(`${LOG_PREFIX} Raw response: ${first.content}`);
 
@@ -54,8 +82,17 @@ export default defineBackground(() => {
 
       if (plans.length === 0 && errors.length > 0) {
         console.warn(`${LOG_PREFIX} Invalid plan, retrying once:`, errors);
+        calls[0]!.parseError = errors.join('; ');
+        const retryStartedAt = Date.now();
         const retry = await chatCompletion(config.apiKey, {
           messages: buildRetryMessages(messages, first.content, errors),
+        });
+        calls.push({
+          ts: retryStartedAt,
+          durationMs: Date.now() - retryStartedAt,
+          model: retry.model,
+          request: buildRetryMessages(messages, first.content, errors),
+          response: retry.content,
         });
         console.log(`${LOG_PREFIX} Retry raw response: ${retry.content}`);
         ({ plans, errors } = parsePlan(retry.content, validIds));
@@ -83,10 +120,20 @@ export default defineBackground(() => {
             : e.message
           : String(e);
       console.error(`${LOG_PREFIX} Run failed:`, message);
+      record.outcome = 'error';
+      record.error = message;
       await setLastError({ message, timestamp: Date.now() });
       await setError();
     } finally {
       inFlight = false;
+      await persist(record, startedAt).catch((e) => {
+        console.error(`${LOG_PREFIX} Failed to persist run log:`, e);
+      });
     }
+  }
+
+  async function persist(record: RunRecord, startedAt: number): Promise<void> {
+    record.durationMs = Date.now() - startedAt;
+    await recordRun(record);
   }
 });

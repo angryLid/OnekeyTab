@@ -42,3 +42,13 @@ export const BADGE_COLORS = {
   error: '#d93025',
   skip: '#34a853',
 } as const;
+
+export const LOG = {
+  indexKey: 'ai-tab-grouper:logIndex',
+  /** Upper cap on stored run logs, well inside Chrome's default 10MB storage.local quota. */
+  maxTotalBytes: 5 * 1024 * 1024,
+  /** How many recent records the UI renders / exports by default. */
+  listWindow: 100,
+  /** Prefix for per-run payload keys. */
+  runKeyPrefix: 'ai-tab-grouper:run:',
+} as const;

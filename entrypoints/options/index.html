@@ -9,7 +9,14 @@
     <main>
       <h1>AI Tab Grouper</h1>
 
-      <section>
+      <nav class="tabs" role="tablist">
+        <button id="tab-settings" class="tab is-active" type="button" role="tab" aria-selected="true">
+          Settings
+        </button>
+        <button id="tab-logs" class="tab" type="button" role="tab" aria-selected="false">Logs</button>
+      </nav>
+
+      <section id="panel-settings" role="tabpanel">
         <h2>OpenRouter API Key</h2>
         <p>
           Get a key at
@@ -21,22 +28,39 @@
         <p id="status" role="status"></p>
       </section>
 
-      <section id="error-section" hidden>
+      <section id="panel-settings-error" hidden>
         <h2>Last run error</h2>
         <p id="last-error" class="error"></p>
         <p id="last-error-time" class="muted"></p>
       </section>
 
-      <section>
+      <section id="panel-settings-privacy">
         <h2>Privacy</h2>
         <p>
           When you click the toolbar icon, tab titles and URLs (origin and path only — no query
           parameters) are sent to OpenRouter for grouping. OpenRouter does not log prompts or
-          completions by default.
+          completions by default. The developer run log is stored locally in this browser and never
+          uploaded; it may contain tab titles and URLs you grouped.
         </p>
       </section>
 
-      <section>
+      <section id="panel-logs" role="tabpanel" hidden>
+        <h2>Run log</h2>
+        <p class="muted">
+          Developer-facing log of what was sent to the model and what it returned. Stored locally,
+          capped at ~5&nbsp;MB (oldest dropped). Never uploaded.
+        </p>
+        <div class="log-toolbar">
+          <button id="export-all" type="button">Export recent (100)</button>
+          <button id="clear-log" type="button" class="danger">Clear all history</button>
+          <span id="log-count" class="muted"></span>
+        </div>
+        <ul id="log-list" class="log-list"></ul>
+        <button id="load-more" type="button" hidden>Load earlier</button>
+        <p id="log-empty" class="muted" hidden>No runs recorded yet.</p>
+      </section>
+
+      <section id="panel-settings-security">
         <h2>Security note</h2>
         <p>
           Your API key is stored in plaintext in this browser's local extension storage. This is

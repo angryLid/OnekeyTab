@@ -85,3 +85,135 @@ button:disabled {
     background-color: #ffffff;
   }
 }
+
+/* Tabs */
+.tabs {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 1.5rem;
+  border-bottom: 1px solid #5c5c5c;
+  padding-bottom: 0.5rem;
+}
+
+.tab {
+  margin-top: 0;
+  background: transparent;
+  color: inherit;
+  border: 1px solid transparent;
+  border-radius: 6px;
+}
+
+.tab.is-active {
+  background: #1a1a1a;
+  border-color: #5c5c5c;
+}
+
+/* Log list */
+.log-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+  flex-wrap: wrap;
+}
+
+.log-toolbar button {
+  margin-top: 0;
+}
+
+.log-toolbar .muted {
+  font-size: 0.85em;
+}
+
+button.danger {
+  background-color: #b3261e;
+}
+
+.log-list {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 1rem;
+}
+
+.log-row {
+  border: 1px solid #3a3a3a;
+  border-radius: 6px;
+  margin-bottom: 0.5rem;
+  overflow: hidden;
+}
+
+.log-row-head {
+  display: flex;
+  gap: 1rem;
+  align-items: baseline;
+  padding: 0.6rem 0.8rem;
+  cursor: pointer;
+  user-select: none;
+}
+
+.log-outcome {
+  font-weight: 600;
+  text-transform: uppercase;
+  font-size: 0.75em;
+  min-width: 3.5em;
+}
+
+.outcome-success .log-outcome {
+  color: #4ade80;
+}
+
+.outcome-error .log-outcome {
+  color: #f87171;
+}
+
+.outcome-skip .log-outcome {
+  color: #9a9a9a;
+}
+
+.log-time {
+  color: inherit;
+}
+
+.log-meta {
+  color: #9a9a9a;
+  flex: 1;
+  font-size: 0.9em;
+}
+
+.log-duration {
+  color: #9a9a9a;
+  font-size: 0.9em;
+}
+
+.log-detail {
+  border-top: 1px solid #3a3a3a;
+  padding: 0.6rem 0.8rem;
+}
+
+.log-detail pre {
+  background: #1a1a1a;
+  padding: 0.6rem;
+  border-radius: 6px;
+  overflow-x: auto;
+  font-size: 0.8em;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.log-detail h4 {
+  margin: 0.5rem 0 0.25rem;
+  font-size: 0.85em;
+}
+
+.call {
+  margin-bottom: 0.75rem;
+}
+
+.call summary {
+  cursor: pointer;
+  font-size: 0.9em;
+}
+
+.row-export {
+  margin-top: 0.75rem;
+}
