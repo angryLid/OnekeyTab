@@ -40,25 +40,33 @@
         <p>
           When you click the toolbar icon, tab titles and URLs (origin and path only — no query
           parameters) are sent to OpenRouter for grouping. OpenRouter does not log prompts or
-          completions by default. The developer run log is stored locally in this browser and never
-          uploaded; it may contain tab titles and URLs you grouped.
+          completions by default. The developer logs are stored locally in this browser and never
+          uploaded; they may contain tab titles and URLs you grouped, plus titles and URLs of all
+          tabs read while selecting candidates.
         </p>
       </section>
 
       <section id="panel-logs" role="tabpanel" hidden>
-        <h2>Run log</h2>
+        <h2>Developer logs</h2>
         <p class="muted">
-          Developer-facing log of what was sent to the model and what it returned. Stored locally,
-          capped at ~5&nbsp;MB (oldest dropped). Never uploaded.
+          <strong>Runs</strong> record what was sent to the model and what it returned.
+          <strong>Tab selection</strong> records every tab read in the window and which rule
+          excluded it (pinned / already grouped / internal URL / …). Stored locally, capped at
+          ~5&nbsp;MB (oldest dropped). Never uploaded.
         </p>
         <div class="log-toolbar">
+          <div class="log-filter" role="group" aria-label="Filter by record type">
+            <button id="filter-all" class="filter is-active" type="button">All</button>
+            <button id="filter-run" class="filter" type="button">Runs</button>
+            <button id="filter-selection" class="filter" type="button">Tab selection</button>
+          </div>
           <button id="export-all" type="button">Export recent (100)</button>
           <button id="clear-log" type="button" class="danger">Clear all history</button>
           <span id="log-count" class="muted"></span>
         </div>
         <ul id="log-list" class="log-list"></ul>
         <button id="load-more" type="button" hidden>Load earlier</button>
-        <p id="log-empty" class="muted" hidden>No runs recorded yet.</p>
+        <p id="log-empty" class="muted" hidden>No records yet.</p>
       </section>
 
       <section id="panel-settings-security">

@@ -3,12 +3,12 @@ import { clearBadge, setError, setPending, setSkip, reconcileOnStartup } from '@
 import { clearLastError, getConfig, setLastError } from '@/lib/config';
 import { LIMITS } from '@/lib/constants';
 import { chatCompletion } from '@/lib/llm';
-import { newRunId, recordRun } from '@/lib/logger';
+import { newRunId, recordLog } from '@/lib/logger';
 import { toModelTabs } from '@/lib/model-input';
 import { parsePlan } from '@/lib/parse-groups';
 import { buildMessages, buildRetryMessages } from '@/lib/prompt';
-import { selectCandidates } from '@/lib/selection';
-import type { RunCall, RunRecord } from '@/lib/types';
+import { auditSelection } from '@/lib/selection';
+import type { RunCall, RunRecord, SelectionRecord } from '@/lib/types';
 
 const LOG_PREFIX = '[ai-tab-grouper]';
 
@@ -48,7 +48,9 @@ export default defineBackground(() => {
     await setPending();
     try {
       const tabs = await browser.tabs.query({ windowId });
-      const candidates = selectCandidates(tabs);
+      const audit = auditSelection(tabs);
+      const candidates = audit.candidates;
+      record.selectionId = await persistSelection(audit, windowId, record.id);
       console.log(`${LOG_PREFIX} ${candidates.length} candidate tabs in window ${windowId}`);
       if (candidates.length < LIMITS.minCandidates) {
         console.log(`${LOG_PREFIX} Skipped: fewer than ${LIMITS.minCandidates} candidates`);
@@ -134,6 +136,32 @@ export default defineBackground(() => {
 
   async function persist(record: RunRecord, startedAt: number): Promise<void> {
     record.durationMs = Date.now() - startedAt;
-    await recordRun(record);
+    await recordLog(record);
+  }
+
+  /** Write the selection audit before anything can fail, so skips/errors stay diagnosable. */
+  async function persistSelection(
+    audit: ReturnType<typeof auditSelection>,
+    windowId: number,
+    runId: string,
+  ): Promise<string | undefined> {
+    const selected = audit.tabs.filter((t) => t.selected);
+    const selection: SelectionRecord = {
+      id: newRunId(),
+      ts: Date.now(),
+      windowId,
+      tabs: audit.tabs,
+      totalTabs: audit.tabs.length,
+      selectedCount: selected.length,
+      excludedCount: audit.tabs.length - selected.length,
+      runId,
+    };
+    try {
+      await recordLog(selection);
+      return selection.id;
+    } catch (e) {
+      console.error(`${LOG_PREFIX} Failed to persist selection log:`, e);
+      return undefined;
+    }
   }
 });

@@ -2,8 +2,9 @@ import './style.css';
 import { getLastError, getConfig, setConfig } from '@/lib/config';
 import { verifyApiKey } from '@/lib/llm';
 import { LOG } from '@/lib/constants';
-import { clearLog, countRuns, getRun, listRecent } from '@/lib/logger';
-import type { RunIndexEntry, RunRecord } from '@/lib/types';
+import { clearLog, countRecords, getRecord, listRecent } from '@/lib/logger';
+import type { AnyLogRecord } from '@/lib/logger';
+import type { AuditTab, ExclusionReason, LogIndexEntry, LogKind, RunRecord, SelectionRecord } from '@/lib/types';
 
 const input = document.querySelector<HTMLInputElement>('#api-key')!;
 const saveButton = document.querySelector<HTMLButtonElement>('#save')!;
@@ -77,11 +78,20 @@ const loadMore = document.querySelector<HTMLButtonElement>('#load-more')!;
 const logEmpty = document.querySelector<HTMLParagraphElement>('#log-empty')!;
 const logCount = document.querySelector<HTMLSpanElement>('#log-count')!;
 
-// Newest-first array of the entries currently displayed.
-let entries: RunIndexEntry[] = [];
+type LogFilter = 'all' | LogKind;
+
+// Newest-first array of the entries currently loaded.
+let entries: LogIndexEntry[] = [];
+let logFilter: LogFilter = 'all';
 let logsRenderedOnce = false;
 
-function outcomeLabel(o: RunIndexEntry['outcome']): string {
+const FILTER_BUTTONS: Array<[LogFilter, string]> = [
+  ['all', '#filter-all'],
+  ['run', '#filter-run'],
+  ['selection', '#filter-selection'],
+];
+
+function outcomeLabel(o: LogIndexEntry['outcome']): string {
   return o === 'success' ? 'ok' : o;
 }
 
@@ -89,21 +99,39 @@ function timeLabel(ts: number): string {
   return new Date(ts).toLocaleString();
 }
 
-function addRow(entry: RunIndexEntry): void {
+function visibleEntries(): LogIndexEntry[] {
+  return logFilter === 'all' ? entries : entries.filter((e) => e.kind === logFilter);
+}
+
+function renderList(): void {
+  logList.innerHTML = '';
+  visibleEntries().forEach(addRow);
+  logEmpty.hidden = visibleEntries().length > 0;
+}
+
+function metaLabel(entry: LogIndexEntry): string {
+  if (entry.kind === 'selection') {
+    const kept = (entry.tabCount ?? 0) - (entry.excludedCount ?? 0);
+    return `read ${entry.tabCount ?? '-'} · kept ${kept} · excluded ${entry.excludedCount ?? '-'}`;
+  }
+  const bits: string[] = [];
+  if (entry.model) bits.push(`model: ${entry.model}`);
+  bits.push(`tabs: ${entry.tabCount ?? '-'}`);
+  return bits.join(' · ');
+}
+
+function addRow(entry: LogIndexEntry): void {
   const li = document.createElement('li');
-  li.className = `log-row outcome-${entry.outcome}`;
+  li.className = `log-row kind-${entry.kind} outcome-${entry.outcome}`;
   const head = document.createElement('div');
   head.className = 'log-row-head';
   head.innerHTML =
-    `<span class="log-outcome">${outcomeLabel(entry.outcome)}</span>` +
+    `<span class="log-kind">${entry.kind}</span>` +
+    (entry.kind === 'run' ? `<span class="log-outcome">${outcomeLabel(entry.outcome)}</span>` : '') +
     `<span class="log-time">${timeLabel(entry.ts)}</span>` +
     `<span class="log-meta" data-id="${entry.id}"></span>` +
-    `<span class="log-duration">${entry.durationMs}ms</span>`;
-  const meta = head.querySelector<HTMLSpanElement>('.log-meta')!;
-  const metaBits: string[] = [];
-  if (entry.model) metaBits.push(`model: ${entry.model}`);
-  metaBits.push(`tabs: ${entry.tabCount ?? '-'}`);
-  meta.textContent = metaBits.join(' · ');
+    (entry.kind === 'run' ? `<span class="log-duration">${entry.durationMs}ms</span>` : '');
+  head.querySelector<HTMLSpanElement>('.log-meta')!.textContent = metaLabel(entry);
 
   const detail = document.createElement('div');
   detail.className = 'log-detail';
@@ -118,18 +146,19 @@ function addRow(entry: RunIndexEntry): void {
   });
 }
 
-async function toggleDetail(detail: HTMLDivElement, entry: RunIndexEntry): Promise<void> {
+async function toggleDetail(detail: HTMLDivElement, entry: LogIndexEntry): Promise<void> {
   if (!detail.hidden) {
     detail.hidden = true;
     return;
   }
-  const record = await getRun(entry.id);
+  const record = await getRecord(entry.id);
   detail.hidden = false;
   if (!record) {
     detail.textContent = 'Record no longer available.';
     return;
   }
-  renderDetail(detail, record);
+  if ('tabs' in record) renderSelectionDetail(detail, record);
+  else renderDetail(detail, record);
 }
 
 function escapeHtml(s: string): string {
@@ -155,38 +184,105 @@ function renderDetail(detail: HTMLDivElement, record: RunRecord): void {
       );
     });
   }
-  const exportBtn = `<button type="button" class="row-export">Export this run</button>`;
-  parts.push(exportBtn);
+  parts.push(`<button type="button" class="row-export">Export this run</button>`);
   detail.innerHTML = parts.join('');
-  const btn = detail.querySelector<HTMLButtonElement>('.row-export')!;
-  btn.addEventListener('click', () => void exportRuns([record]));
+  detail.querySelector<HTMLButtonElement>('.row-export')!.addEventListener('click', () => void exportRecords([record]));
+  if (record.selectionId) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'row-selection';
+    btn.textContent = 'Show tab selection audit for this run';
+    const container = document.createElement('div');
+    container.hidden = true;
+    btn.addEventListener('click', () => {
+      if (!container.hidden) {
+        container.hidden = true;
+        return;
+      }
+      void (async () => {
+        const selection = await getRecord(record.selectionId!);
+        container.hidden = false;
+        if (!selection || !('tabs' in selection)) {
+          container.textContent = 'Selection record no longer available.';
+          return;
+        }
+        renderSelectionDetail(container, selection);
+      })();
+    });
+    detail.appendChild(btn);
+    detail.appendChild(container);
+  }
+}
+
+const REASON_LABELS: Record<ExclusionReason, string> = {
+  'no-id': 'no tab id',
+  pinned: 'pinned',
+  grouped: 'already grouped',
+  'no-url': 'no url',
+  'internal-url': 'internal url',
+  'over-cap': 'beyond 50-tab cap',
+};
+
+function reasonLabel(tab: AuditTab): string {
+  if (!tab.reason) return '';
+  const base = REASON_LABELS[tab.reason];
+  return tab.reason === 'grouped' && tab.groupId != null ? `${base} (group ${tab.groupId})` : base;
+}
+
+function renderSelectionDetail(detail: HTMLDivElement, record: SelectionRecord): void {
+  const parts: string[] = [];
+  parts.push(
+    `<p class="muted">window ${record.windowId} · read ${record.totalTabs} · kept ${record.selectedCount} · excluded ${record.excludedCount}</p>`,
+  );
+  parts.push(
+    `<table class="sel-table"><thead><tr><th></th><th>exclusion reason</th><th>title</th><th>url</th></tr></thead><tbody>`,
+  );
+  for (const tab of record.tabs) {
+    parts.push(
+      `<tr class="${tab.selected ? 'sel-kept' : 'sel-dropped'}">` +
+        `<td class="sel-status">${tab.selected ? '✓' : '✗'}</td>` +
+        `<td>${escapeHtml(reasonLabel(tab))}</td>` +
+        `<td>${escapeHtml(tab.title || '(untitled)')}</td>` +
+        `<td>${tab.url ? escapeHtml(tab.url) : '<span class="muted">—</span>'}</td>` +
+        `</tr>`,
+    );
+  }
+  parts.push('</tbody></table>');
+  parts.push(`<button type="button" class="row-export">Export this audit</button>`);
+  detail.innerHTML = parts.join('');
+  detail.querySelector<HTMLButtonElement>('.row-export')!.addEventListener('click', () => void exportRecords([record]));
 }
 
 async function refreshCount(): Promise<void> {
-  const total = await countRuns();
-  logCount.textContent = `${total} run${total === 1 ? '' : 's'} recorded`;
+  const total = await countRecords();
+  logCount.textContent = `${total} record${total === 1 ? '' : 's'} recorded`;
 }
 
 async function refreshLogs(): Promise<void> {
   if (!logsRenderedOnce) {
     entries = await listRecent(LOG.listWindow); // newest-first, up to 100
-    logList.innerHTML = '';
-    entries.forEach(addRow);
     logsRenderedOnce = true;
   }
+  renderList();
   await refreshCount();
-  logEmpty.hidden = entries.length > 0;
-  loadMore.hidden = entries.length >= (await countRuns());
+  loadMore.hidden = entries.length >= (await countRecords());
+}
+
+for (const [name, selector] of FILTER_BUTTONS) {
+  document.querySelector<HTMLButtonElement>(selector)!.addEventListener('click', () => {
+    logFilter = name;
+    for (const [n, s] of FILTER_BUTTONS) {
+      document.querySelector<HTMLButtonElement>(s)!.classList.toggle('is-active', n === name);
+    }
+    renderList();
+  });
 }
 
 loadMore.addEventListener('click', async () => {
-  const next = await listRecent(entries.length + LOG.listWindow);
-  const newly = next.slice(entries.length);
-  newly.forEach(addRow);
-  entries = next;
+  entries = await listRecent(entries.length + LOG.listWindow);
+  renderList();
   await refreshCount();
-  logEmpty.hidden = entries.length > 0;
-  loadMore.hidden = entries.length >= (await countRuns());
+  loadMore.hidden = entries.length >= (await countRecords());
 });
 
 function download(filename: string, text: string): void {
@@ -198,28 +294,27 @@ function download(filename: string, text: string): void {
   URL.revokeObjectURL(url);
 }
 
-async function exportRuns(records: RunRecord[]): Promise<void> {
+async function exportRecords(records: AnyLogRecord[]): Promise<void> {
   const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
   download(`ai-tab-grouper-logs-${stamp}.json`, JSON.stringify(records, null, 2));
 }
 
 document.querySelector<HTMLButtonElement>('#export-all')!.addEventListener('click', async () => {
   // Export the currently visible window (recent up to LOG.listWindow).
-  const entries = await listRecent(LOG.listWindow);
-  const records: RunRecord[] = [];
-  for (const e of entries) {
-    const r = await getRun(e.id);
+  const recent = await listRecent(LOG.listWindow);
+  const records: AnyLogRecord[] = [];
+  for (const e of recent) {
+    const r = await getRecord(e.id);
     if (r) records.push(r);
   }
-  await exportRuns(records);
+  await exportRecords(records);
 });
 
 document.querySelector<HTMLButtonElement>('#clear-log')!.addEventListener('click', async () => {
-  const total = await countRuns();
+  const total = await countRecords();
   if (total === 0) return;
-  if (!confirm(`Clear all ${total} recorded run(s)? This cannot be undone.`)) return;
+  if (!confirm(`Clear all ${total} recorded record(s)? This cannot be undone.`)) return;
   await clearLog();
-  logList.innerHTML = '';
   entries = [];
   logsRenderedOnce = false;
   await refreshLogs();

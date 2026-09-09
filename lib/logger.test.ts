@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { LOG } from './constants';
 import { appendToIndex, newRunId, removeFromIndex } from './logger';
-import type { LogIndex, RunRecord } from './types';
+import type { LogIndex, RunRecord, SelectionRecord } from './types';
 
 function rec(overrides: Partial<RunRecord> = {}): RunRecord {
   return {
@@ -59,6 +59,55 @@ describe('appendToIndex', () => {
     const index = appendToIndex({ entries: [], totalBytes: 0 }, a, 10);
     expect(index.entries).toHaveLength(1);
     expect(index.entries[0]!.id).toBe(a.id);
+  });
+});
+
+function selRec(overrides: Partial<SelectionRecord> = {}): SelectionRecord {
+  return {
+    id: newRunId(),
+    ts: 0,
+    windowId: 1,
+    tabs: [
+      { id: 1, title: 'A', pinned: false, selected: true },
+      { id: 2, title: 'B', pinned: true, selected: false, reason: 'pinned' },
+    ],
+    totalTabs: 2,
+    selectedCount: 1,
+    excludedCount: 1,
+    ...overrides,
+  };
+}
+
+describe('appendToIndex (selection records)', () => {
+  it('projects a selection record into a selection entry with counts', () => {
+    const index = appendToIndex({ entries: [], totalBytes: 0 }, selRec(), 1_000_000);
+    expect(index.entries).toHaveLength(1);
+    const e = index.entries[0]!;
+    expect(e.kind).toBe('selection');
+    expect(e.outcome).toBe('success');
+    expect(e.tabCount).toBe(2);
+    expect(e.excludedCount).toBe(1);
+    expect(e.bytes).toBe(JSON.stringify(selRec()).length);
+  });
+
+  it('projects run records with kind "run" and run fields', () => {
+    const index = appendToIndex({ entries: [], totalBytes: 0 }, rec(), 1_000_000);
+    const e = index.entries[0]!;
+    expect(e.kind).toBe('run');
+    expect(e.outcome).toBe('success');
+    expect(e.excludedCount).toBeUndefined();
+  });
+
+  it('applies the shared byte cap across kinds, evicting oldest regardless of kind', () => {
+    let index: LogIndex = { entries: [], totalBytes: 0 };
+    const selection = selRec();
+    const run = bigRecord('x'.repeat(50));
+    index = appendToIndex(index, selection, 1_000_000);
+    index = appendToIndex(index, run, 1_000_000);
+    const onlyRunBytes = appendToIndex({ entries: [], totalBytes: 0 }, run, 1_000_000).totalBytes;
+    const capped = appendToIndex(index, bigRecord('y'.repeat(50)), onlyRunBytes);
+    expect(capped.entries.map((e) => e.id)).not.toContain(selection.id);
+    expect(capped.totalBytes).toBe(capped.entries.reduce((s, e) => s + e.bytes, 0));
   });
 });
 

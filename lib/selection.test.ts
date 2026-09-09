@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Browser } from 'wxt/browser';
-import { selectCandidates } from './selection';
+import { LIMITS } from './constants';
+import { auditSelection, firstExclusionReason, selectCandidates } from './selection';
 
 function tab(overrides: Partial<Browser.tabs.Tab> & { id: number }): Browser.tabs.Tab {
   return {
@@ -44,5 +45,55 @@ describe('selectCandidates (happy path)', () => {
     const result = selectCandidates(tabs);
     expect(result).toHaveLength(50);
     expect(result[0]?.id).toBe(60);
+  });
+});
+
+describe('firstExclusionReason', () => {
+  it('reports the first matching rule in filter-chain order', () => {
+    expect(firstExclusionReason(tab({ id: 1 }))).toBeNull();
+    expect(firstExclusionReason(tab({ id: null as unknown as number, pinned: true }))).toBe('no-id');
+    expect(firstExclusionReason(tab({ id: 2, pinned: true, groupId: 5 }))).toBe('pinned');
+    expect(firstExclusionReason(tab({ id: 3, groupId: 5, url: '' }))).toBe('grouped');
+    expect(firstExclusionReason(tab({ id: 4, url: '' }))).toBe('no-url');
+    expect(firstExclusionReason(tab({ id: 5, url: 'chrome://newtab/' }))).toBe('internal-url');
+  });
+});
+
+describe('auditSelection', () => {
+  it('marks every read tab as selected or excluded with the rule that dropped it', () => {
+    const audit = auditSelection([
+      tab({ id: 1, url: 'https://a.com/' }),
+      tab({ id: 2, groupId: 7, url: 'https://b.com/' }),
+      tab({ id: 3, pinned: true }),
+      tab({ id: 4, url: 'chrome://settings/' }),
+    ]);
+    expect(audit.candidates.map((t) => t.id)).toEqual([1]);
+    expect(audit.tabs).toHaveLength(4);
+    const byId = new Map(audit.tabs.map((t) => [t.id, t]));
+    expect(byId.get(1)).toMatchObject({ selected: true });
+    expect(byId.get(2)).toMatchObject({ selected: false, reason: 'grouped', groupId: 7 });
+    expect(byId.get(3)).toMatchObject({ selected: false, reason: 'pinned' });
+    expect(byId.get(4)).toMatchObject({ selected: false, reason: 'internal-url', url: 'chrome://settings/' });
+  });
+
+  it('marks rule-passing tabs beyond the maxTabs cap as over-cap, oldest first', () => {
+    const tabs = Array.from({ length: LIMITS.maxTabs + 2 }, (_, i) => tab({ id: i + 1, lastAccessed: i }));
+    const audit = auditSelection(tabs);
+    expect(audit.candidates).toHaveLength(LIMITS.maxTabs);
+    const dropped = audit.tabs.filter((t) => t.reason === 'over-cap');
+    expect(dropped.map((t) => t.id)).toEqual([1, 2]);
+    expect(dropped[0]?.lastAccessed).toBe(0);
+  });
+
+  it('never disagrees with selectCandidates', () => {
+    const tabs = [
+      tab({ id: 1, pinned: true }),
+      tab({ id: 2, url: 'https://x.com/' }),
+      tab({ id: 3, groupId: 1 }),
+      tab({ id: 4, url: 'about:blank' }),
+    ];
+    const audit = auditSelection(tabs);
+    expect(audit.candidates).toEqual(selectCandidates(tabs));
+    expect(audit.tabs.filter((t) => t.selected)).toHaveLength(audit.candidates.length);
   });
 });

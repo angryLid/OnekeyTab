@@ -1,17 +1,21 @@
 import { browser } from 'wxt/browser';
 import { LOG } from './constants';
-import type { LogIndex, RunIndexEntry, RunRecord } from './types';
+import type { LogIndex, LogIndexEntry, LogKind, RunRecord, SelectionRecord } from './types';
+
+/** Any record kind the log can store. */
+export type AnyLogRecord = RunRecord | SelectionRecord;
 
 /**
- * Developer-facing run log.
+ * Developer-facing logs (two record kinds: `run` and `selection`).
  *
- * Layout: one lightweight index key plus one payload key per run
- * (`ai-tab-grouper:run:<id>`). The index keeps a small projection (including
- * each record's byte size) so the log list page never loads full payloads; a
- * single record is read on demand when its details are opened. Stored size is
- * capped (`LOG.maxTotalBytes`, safely inside Chrome's default 10MB
- * `storage.local` quota), evicting oldest runs first. A failed write (e.g.
- * Firefox's global disk quota) retries once by dropping the oldest record.
+ * Layout: one lightweight index key plus one payload key per record
+ * (`ai-tab-grouper:run:<id>`, shared by both kinds — ids are unique). The
+ * index keeps a small projection (including each record's byte size) so the
+ * log list page never loads full payloads; a single record is read on demand
+ * when its details are opened. Stored size is capped (`LOG.maxTotalBytes`,
+ * safely inside Chrome's default 10MB `storage.local` quota), evicting oldest
+ * records first regardless of kind. A failed write (e.g. Firefox's global
+ * disk quota) retries once by dropping the oldest record.
  *
  * The log never contains the API key; callers must not put it into messages.
  */
@@ -28,14 +32,27 @@ function emptyIndex(): LogIndex {
 }
 
 /** Estimated serialized size of a full record — used for the byte cap. */
-export function recordBytes(record: RunRecord): number {
+export function recordBytes(record: AnyLogRecord): number {
   return JSON.stringify(record).length;
 }
 
-function entryFromRecord(record: RunRecord): RunIndexEntry {
+function entryFromRecord(record: AnyLogRecord): LogIndexEntry {
+  if ('tabs' in record) {
+    return {
+      id: record.id,
+      kind: 'selection',
+      ts: record.ts,
+      outcome: 'success',
+      durationMs: 0,
+      tabCount: record.totalTabs,
+      excludedCount: record.excludedCount,
+      bytes: recordBytes(record),
+    };
+  }
   const lastCall = record.calls?.[record.calls.length - 1];
   return {
     id: record.id,
+    kind: 'run',
     ts: record.ts,
     outcome: record.outcome,
     durationMs: record.durationMs,
@@ -51,7 +68,7 @@ function entryFromRecord(record: RunRecord): RunIndexEntry {
  * stored `bytes`) and applying the byte cap by dropping the oldest runs first.
  * Pure — unit tested.
  */
-export function appendToIndex(index: LogIndex, record: RunRecord, capBytes: number): LogIndex {
+export function appendToIndex(index: LogIndex, record: AnyLogRecord, capBytes: number): LogIndex {
   const entry = entryFromRecord(record);
   const entries = [...index.entries, entry];
   let totalBytes = index.totalBytes + entry.bytes;
@@ -77,7 +94,10 @@ export function removeFromIndex(index: LogIndex, id: string): LogIndex {
 async function loadIndex(): Promise<LogIndex> {
   const res = await browser.storage.local.get(LOG.indexKey);
   const raw = (res[LOG.indexKey] as LogIndex | undefined) ?? null;
-  if (raw && Array.isArray(raw.entries)) return raw;
+  if (raw && Array.isArray(raw.entries)) {
+    // Indexes written before the selection log existed have no `kind`; they are runs.
+    return { entries: raw.entries.map((e) => ({ kind: 'run' as LogKind, ...e })), totalBytes: raw.totalBytes };
+  }
   return emptyIndex();
 }
 
@@ -85,6 +105,7 @@ async function saveIndex(index: LogIndex): Promise<void> {
   await browser.storage.local.set({ [LOG.indexKey]: index });
 }
 
+/** Per-record payload key prefix; shared by both record kinds (ids are unique). */
 function runKey(id: string): string {
   return LOG.runKeyPrefix + id;
 }
@@ -95,7 +116,7 @@ function isQuotaError(e: unknown): boolean {
 }
 
 /** Persist one full record, pruning by byte cap, retrying once on quota errors. */
-export async function recordRun(record: RunRecord): Promise<void> {
+export async function recordLog(record: AnyLogRecord): Promise<void> {
   const payloadKey = runKey(record.id);
   for (let attempt = 0; attempt < 2; attempt++) {
     const index = await loadIndex();
@@ -123,7 +144,7 @@ async function removeIndexEntryOnly(id: string): Promise<void> {
 }
 
 /** Drop a single record by id (payload + index entry). */
-export async function removeRun(id: string): Promise<void> {
+export async function removeRecord(id: string): Promise<void> {
   await removeIndexEntryOnly(id);
 }
 
@@ -137,19 +158,19 @@ export async function clearLog(): Promise<number> {
 }
 
 /** Most recent `window` records, newest first, reading only the index. */
-export async function listRecent(window: number = LOG.listWindow): Promise<RunIndexEntry[]> {
+export async function listRecent(window: number = LOG.listWindow): Promise<LogIndexEntry[]> {
   const index = await loadIndex();
   return [...index.entries].reverse().slice(0, window);
 }
 
-/** Total count of recorded runs (for "clear all (N records)" labeling). */
-export async function countRuns(): Promise<number> {
+/** Total count of recorded records (for the "clear all (N records)" labeling). */
+export async function countRecords(): Promise<number> {
   const index = await loadIndex();
   return index.entries.length;
 }
 
 /** Fetch a single full record by id; null if gone. */
-export async function getRun(id: string): Promise<RunRecord | null> {
+export async function getRecord(id: string): Promise<AnyLogRecord | null> {
   const res = await browser.storage.local.get(runKey(id));
-  return (res[runKey(id)] as RunRecord | undefined) ?? null;
+  return (res[runKey(id)] as AnyLogRecord | undefined) ?? null;
 }

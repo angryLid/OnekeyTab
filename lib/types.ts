@@ -43,9 +43,44 @@ export interface ApplyReport {
   failures: string[];
 }
 
-// ---- Run log ----
+// ---- Logs (two record kinds share one index and byte cap) ----
+
+export type LogKind = 'run' | 'selection';
 
 export type RunOutcome = 'success' | 'skip' | 'error';
+
+/** Why a read tab was not offered to the model; the first matching rule wins. */
+export type ExclusionReason = 'no-id' | 'pinned' | 'grouped' | 'no-url' | 'internal-url' | 'over-cap';
+
+/** One audited tab: what the extension read and whether a rule excluded it. */
+export interface AuditTab {
+  id: number | null;
+  title: string;
+  /** origin + pathname (query/hash stripped); absent when the tab had no URL. */
+  url?: string;
+  pinned: boolean;
+  /** Present only for tabs that are in a group (> 0). */
+  groupId?: number;
+  /** Present only for over-cap exclusions, where recency decides. */
+  lastAccessed?: number;
+  selected: boolean;
+  /** The rule that excluded this tab; absent when selected. */
+  reason?: ExclusionReason;
+}
+
+/** Selection audit record: exactly which tabs were read and why each was kept or dropped. */
+export interface SelectionRecord {
+  id: string;
+  ts: number;
+  windowId: number;
+  /** All tabs `tabs.query({ windowId })` returned, in query order. */
+  tabs: AuditTab[];
+  totalTabs: number;
+  selectedCount: number;
+  excludedCount: number;
+  /** Id of the run record from the same click, when one exists. */
+  runId?: string;
+}
 
 export interface RunCall {
   /** When the request was fired. */
@@ -77,24 +112,33 @@ export interface RunRecord {
   error?: string;
   /** One per LLM call; absent when the model was never reached. */
   calls?: RunCall[];
+  /** Id of the selection audit record from the same click. */
+  selectionId?: string;
 }
 
 /** Lightweight projection stored in the index; a full record is read on demand. */
-export interface RunIndexEntry {
+export interface LogIndexEntry {
   id: string;
+  kind: LogKind;
   ts: number;
   outcome: RunOutcome;
   durationMs: number;
+  /** Run: model tabs. Selection: total tabs read. */
   tabCount?: number;
+  /** Selection only: how many of the read tabs were excluded. */
+  excludedCount?: number;
   model?: string;
   error?: string;
   /** Estimated serialized byte size of the full record, used for the cap. */
   bytes: number;
 }
 
+/** @deprecated Legacy name; use LogIndexEntry. */
+export type RunIndexEntry = LogIndexEntry;
+
 export interface LogIndex {
   /** Oldest-first. */
-  entries: RunIndexEntry[];
+  entries: LogIndexEntry[];
   /** Total estimated serialized bytes of all kept records. */
   totalBytes: number;
 }
