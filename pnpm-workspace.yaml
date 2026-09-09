@@ -1,0 +1,20 @@
+# pnpm workspace config.
+#
+# supportedArchitectures: install optional/native dependencies for BOTH macOS
+# and Linux (and x64 + arm64), not just the machine currently running the
+# install. WXT's build chain (rolldown, fsevents, esbuild) ships per-platform
+# binaries as optionalDependencies; without this, copying node_modules between
+# a Mac and a Linux box breaks with "Cannot find native binding" errors.
+supportedArchitectures:
+  os:
+    - darwin
+    - linux
+    - current
+  cpu:
+    - x64
+    - arm64
+    - current
+  libc:
+    - glibc
+    - musl
+    - current
