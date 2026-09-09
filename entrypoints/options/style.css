@@ -106,6 +106,7 @@ button:disabled {
 .tab.is-active {
   background: #1a1a1a;
   border-color: #5c5c5c;
+  color: #fff;
 }
 
 /* Log list */
@@ -192,6 +193,7 @@ button.danger {
 
 .log-detail pre {
   background: #1a1a1a;
+  color: #fff;
   padding: 0.6rem;
   border-radius: 6px;
   overflow-x: auto;
