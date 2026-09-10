@@ -102,7 +102,8 @@ is exactly what our capability probe must verify on each Vivaldi release.
 
 ## The vivExtData stack bridge (planned adaptation)
 
-The full implementation design now lives in `docs/design-vivaldi-stacks.md` (backend
+The full implementation design — plus the reverse-engineered stack architecture and the
+TidyTabs/TidyTitles prior-art analysis — now lives in `docs/vivaldi-stacks.md` (backend
 matrix, capability probe, selection/dedupe rule changes, failure matrix, test and
 verification plans). The summary below stays as the original research sketch:
 Design for this codebase, replacing the previous "side panel only" plan:
@@ -144,16 +145,19 @@ surface, but Vivaldi version matrix must be re-tested per major release.
 
 ## Escape hatch: Vivaldi UI Modifications (user-side mod)
 
-Vivaldi tolerates UI modding:
+Mechanism, corrected against the Awesome-Vivaldi install guide (full details and the
+`vivaldi.tabsPrivate` channel analysis live in `docs/vivaldi-stacks.md`):
 
-1. User enables `vivaldi://experiments` -> "Allow UI Modifications".
-2. User drops a `.js`/`.css` file into the profile's `User Files`
-   directory and restarts.
-3. The mod runs inside the browser UI process, where it can access BOTH
-   `chrome.tabs.*` / `chrome.tabGroups.*` (the same data model the
-   extension writes to) AND Vivaldi's internal tab bar components,
-   including stack operations (undocumented, reverse-engineered by the
-   mod community; may break on major Vivaldi updates).
+1. The official customization channel is CSS-only: `vivaldi://flags/#vivaldi-css-mods`
+   -> Settings -> Appearance -> Custom UI Modifications -> pick a folder of `.css` files.
+2. JS mods are unofficial: copy the script into
+   `<app>/<version>/resources/vivaldi/` and reference it from that directory's
+   `window.html`. Every Vivaldi upgrade replaces the version directory and wipes the
+   change, so mod users run re-injection tools.
+3. The mod runs inside the browser UI page, where it can access BOTH
+   `chrome.tabs.*` (the same data model the extension writes to) AND the privileged
+   `vivaldi.*` namespace (`tabsPrivate.move` / `setGroupProperties` / `unstack` —
+   the channel drag-and-drop itself uses).
 
 Key design insight: the extension and the mod need no private channel —
 the native groupId itself is the interface. The extension writes groups
@@ -234,4 +238,4 @@ The dedupe pre-pass (see `docs/design-dedupe.md`) now adapts to Vivaldi:
 - Grouping candidate selection now mirrors the dedupe exception on Vivaldi: native groupIds
   are untrusted (invisible, possibly stale) and no longer exclude tabs from candidates or
   re-grouping; visible stack members (`vivExtData.group`) remain excluded. See
-  `docs/design-vivaldi-stacks.md` for the full stack-bridge design.
+  `docs/vivaldi-stacks.md` for the full stack-bridge design.
