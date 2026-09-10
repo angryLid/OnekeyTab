@@ -1,12 +1,17 @@
 import { browser } from 'wxt/browser';
-import type { Config, LastError } from './types';
+import { DEDUPE } from './constants';
+import type { Config, DedupeConfig, LastError } from './types';
 
 const CONFIG_KEY = 'ai-tab-grouper:config';
 const LAST_ERROR_KEY = 'ai-tab-grouper:lastError';
 
+const DEFAULT_DEDUPE: DedupeConfig = { enabled: true, threshold: DEDUPE.threshold };
+
 export async function getConfig(): Promise<Config | null> {
   const res = await browser.storage.local.get(CONFIG_KEY);
-  return (res[CONFIG_KEY] as Config | undefined) ?? null;
+  const raw = res[CONFIG_KEY] as Config | undefined;
+  // Merge defaults so configs stored before the dedupe feature behave as if enabled.
+  return raw ? { ...raw, dedupe: raw.dedupe ?? DEFAULT_DEDUPE } : null;
 }
 
 export async function setConfig(config: Config): Promise<void> {

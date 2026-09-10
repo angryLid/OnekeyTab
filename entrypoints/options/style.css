@@ -148,6 +148,30 @@ button.danger {
   background-color: #b3261e;
 }
 
+.dedupe-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.dedupe-toggle input[type='checkbox'] {
+  width: auto;
+  max-width: none;
+}
+
+.dedupe-threshold-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.dedupe-threshold-row input[type='range'] {
+  width: 16rem;
+  padding: 0;
+  background: transparent;
+  border: none;
+}
+
 .log-list {
   list-style: none;
   padding: 0;
@@ -192,6 +216,11 @@ button.danger {
 .kind-selection .log-kind {
   color: #7dd3fc;
   border-color: #7dd3fc;
+}
+
+.kind-dedupe .log-kind {
+  color: #fbbf24;
+  border-color: #fbbf24;
 }
 
 .kind-selection .log-outcome {

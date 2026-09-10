@@ -125,3 +125,26 @@ reliability becomes the perceived reliability of our grouping feature.
 | Tab Stacks extension API | Does not exist |
 | UI Modifications mod bridge | Possible, user-installed, unofficial |
 | Native group persistence across restart | Unverified, forum reports of loss |
+
+## Implemented adaptation: dedupe exception (this codebase)
+
+The dedupe pre-pass (see `docs/design-dedupe.md`) now adapts to Vivaldi:
+
+- `lib/vivaldi.ts` detects Vivaldi at runtime: primarily the `vivExtData` (legacy `exData`)
+  property Vivaldi injects into every `chrome.tabs.Tab` returned to extensions — masking-proof;
+  secondarily UA-CH brands and the UA string, which only match when the user opted in to
+  branding (Vivaldi masks both by default, see the official help page linked above).
+- On Vivaldi only, the dedupe eligibility chain (`lib/selection.ts` →
+  `dedupeEligibilityReason`) drops the `grouped` rule: tabs carrying an invisible groupId
+  participate in dedupe and can be closed. Closing a grouped tab just shrinks an unrendered
+  group; empty groups vanish in the data model, so there is no UI-level damage.
+- `vivaldi://` was added to the internal-scheme exclusion list (it was previously treated as a
+  normal page and could be grouped/deduped).
+- Each dedupe record snapshots `params.ignoreGrouped`, and the log detail view shows
+  "grouped tabs in scope (Vivaldi)" — the layer confusion that triggered the original
+  investigation is now visible in the logs, as recommended in strategy item 5 above. A settings
+  override (Auto / Always include / Never include) covers a fully-masked Vivaldi where neither
+  signal fires.
+- Grouping candidate selection is unchanged on Vivaldi (already-grouped tabs are not re-sent to
+  the model); invisible groups keep accumulating until a native-UI bridge (UI Modifications mod,
+  side panel, strategy items 2/4) is built.

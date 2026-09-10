@@ -1,14 +1,17 @@
 import { applyPlans } from '@/lib/apply-groups';
-import { clearBadge, setError, setPending, setSkip, reconcileOnStartup } from '@/lib/badge';
+import { clearBadge, setClosedFlash, setError, setPending, setSkip, reconcileOnStartup } from '@/lib/badge';
 import { clearLastError, getConfig, setLastError } from '@/lib/config';
-import { LIMITS } from '@/lib/constants';
+import { DEDUPE, LIMITS } from '@/lib/constants';
+import { planDedupe } from '@/lib/dedupe';
 import { chatCompletion } from '@/lib/llm';
-import { newRunId, recordLog } from '@/lib/logger';
+import { newRunId, recordLog, updateLogRecord } from '@/lib/logger';
 import { toModelTabs } from '@/lib/model-input';
 import { parsePlan } from '@/lib/parse-groups';
 import { buildMessages, buildRetryMessages } from '@/lib/prompt';
-import { auditSelection } from '@/lib/selection';
-import type { RunCall, RunRecord, SelectionRecord } from '@/lib/types';
+import { auditSelection, dedupeEligibilityReason } from '@/lib/selection';
+import { isVivaldi } from '@/lib/vivaldi';
+import type { Browser } from 'wxt/browser';
+import type { DedupeRecord, DedupeTabRecord, RunCall, RunRecord, SelectionRecord } from '@/lib/types';
 
 const LOG_PREFIX = '[ai-tab-grouper]';
 
@@ -46,9 +49,19 @@ export default defineBackground(() => {
 
     inFlight = true;
     await setPending();
+    // getConfig merges defaults, so dedupe settings are always present at runtime.
+    const dedupeConfig = config.dedupe ?? { enabled: true, threshold: DEDUPE.threshold };
     try {
       const tabs = await browser.tabs.query({ windowId });
-      const audit = auditSelection(tabs);
+      let workingTabs = tabs;
+      let dedupeClosed = 0;
+      if (dedupeConfig.enabled) {
+        // Manual override wins; otherwise auto-detect Vivaldi, whose native tab groups render nowhere.
+        const ignoreGrouped = dedupeConfig.ignoreGrouped ?? isVivaldi(tabs);
+        dedupeClosed = await runDedupe(record, tabs, dedupeConfig.threshold, windowId, ignoreGrouped);
+        if (dedupeClosed > 0) workingTabs = await browser.tabs.query({ windowId });
+      }
+      const audit = auditSelection(workingTabs);
       const candidates = audit.candidates;
       record.selectionId = await persistSelection(audit, windowId, record.id);
       console.log(`${LOG_PREFIX} ${candidates.length} candidate tabs in window ${windowId}`);
@@ -56,7 +69,8 @@ export default defineBackground(() => {
         console.log(`${LOG_PREFIX} Skipped: fewer than ${LIMITS.minCandidates} candidates`);
         record.outcome = 'skip';
         record.reason = `Fewer than ${LIMITS.minCandidates} candidate tabs`;
-        await setSkip();
+        if (dedupeClosed > 0) await setClosedFlash(dedupeClosed);
+        else await setSkip();
         return;
       }
 
@@ -113,7 +127,8 @@ export default defineBackground(() => {
         report.failures,
       );
       await clearLastError();
-      await clearBadge();
+      if (dedupeClosed > 0) await setClosedFlash(dedupeClosed);
+      else await clearBadge();
     } catch (e) {
       const message =
         e instanceof Error
@@ -137,6 +152,81 @@ export default defineBackground(() => {
   async function persist(record: RunRecord, startedAt: number): Promise<void> {
     record.durationMs = Date.now() - startedAt;
     await recordLog(record);
+  }
+
+  /**
+   * Dedupe pre-pass: plan over eligible tabs, persist the record before any destructive action,
+   * close, then verify actual outcomes (a declined beforeunload prompt leaves the tab open).
+   * Returns how many tabs were actually removed.
+   */
+  async function runDedupe(
+    record: RunRecord,
+    tabs: Browser.tabs.Tab[],
+    threshold: number,
+    windowId: number,
+    ignoreGrouped: boolean,
+  ): Promise<number> {
+    const eligible = tabs.filter((t) => dedupeEligibilityReason(t, ignoreGrouped) == null);
+    const plan = planDedupe(eligible, threshold);
+    const tabById = new Map(eligible.map((t) => [t.id as number, t]));
+    const entries: DedupeTabRecord[] = plan.entries.map((entry) => {
+      const tab = tabById.get(entry.tabId)!;
+      const tabRec: DedupeTabRecord = {
+        id: entry.tabId,
+        url: tab.url ?? '',
+        title: (tab.title ?? '').slice(0, LIMITS.titleMax),
+        lastAccessed: tab.lastAccessed ?? 0,
+        role: entry.role,
+      };
+      if (entry.score != null) {
+        tabRec.score = entry.score;
+        tabRec.baselineId = entry.baselineId;
+      }
+      return tabRec;
+    });
+    const dedupe: DedupeRecord = {
+      id: newRunId(),
+      ts: Date.now(),
+      windowId,
+      params: {
+        threshold,
+        weightPath: DEDUPE.weightPath,
+        weightQuery: DEDUPE.weightQuery,
+        substituteCost: DEDUPE.substituteCost,
+        ignoreGrouped,
+      },
+      tabs: entries,
+      plannedCloseCount: plan.closedIds.length,
+      runId: record.id,
+    };
+    // Persist the plan before closing anything, so even a crash mid-close stays diagnosable.
+    try {
+      await recordLog(dedupe);
+      record.dedupeId = dedupe.id;
+    } catch (e) {
+      console.error(`${LOG_PREFIX} Failed to persist dedupe log:`, e);
+    }
+    if (plan.closedIds.length === 0) return 0;
+    try {
+      await browser.tabs.remove(plan.closedIds);
+    } catch (e) {
+      console.warn(`${LOG_PREFIX} tabs.remove failed (some tabs may already be gone):`, e);
+    }
+    const survivors = new Set((await browser.tabs.query({ windowId })).map((t) => t.id as number));
+    let closed = 0;
+    for (const entry of dedupe.tabs) {
+      if (entry.role !== 'closed') continue;
+      entry.outcome = survivors.has(entry.id) ? 'declined' : 'removed';
+      if (entry.outcome === 'removed') closed++;
+    }
+    dedupe.closedCount = closed;
+    try {
+      await updateLogRecord(dedupe);
+    } catch (e) {
+      console.error(`${LOG_PREFIX} Failed to backfill dedupe outcomes:`, e);
+    }
+    console.log(`${LOG_PREFIX} Dedupe closed ${closed}/${plan.closedIds.length} planned tabs`);
+    return closed;
   }
 
   /** Write the selection audit before anything can fail, so skips/errors stay diagnosable. */

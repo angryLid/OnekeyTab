@@ -3,7 +3,7 @@ import { LIMITS } from './constants';
 import { sanitizeUrl } from './model-input';
 import type { AuditTab, ExclusionReason } from './types';
 
-const INTERNAL_SCHEMES = ['about:', 'chrome:', 'edge:', 'chrome-extension:', 'moz-extension:', 'extension:'];
+const INTERNAL_SCHEMES = ['about:', 'chrome:', 'edge:', 'chrome-extension:', 'moz-extension:', 'extension:', 'vivaldi:'];
 
 function isInternalUrl(url: string): boolean {
   const lower = url.toLowerCase();
@@ -12,6 +12,17 @@ function isInternalUrl(url: string): boolean {
 
 function isUngrouped(tab: Browser.tabs.Tab): boolean {
   return tab.groupId == null || tab.groupId <= 0;
+}
+
+/**
+ * Dedupe eligibility: the selection chain, but on Vivaldi the `grouped` rule is ignored —
+ * Vivaldi does not render native tab groups, so a groupId there is invisible state that must
+ * not hide tabs from dedupe (closing one just shrinks an unrendered group).
+ */
+export function dedupeEligibilityReason(tab: Browser.tabs.Tab, ignoreGrouped: boolean): ExclusionReason | null {
+  const reason = firstExclusionReason(tab);
+  if (reason === 'grouped' && ignoreGrouped) return null;
+  return reason;
 }
 
 /** First exclusion rule the tab trips, in filter-chain order; null when it is a candidate. */

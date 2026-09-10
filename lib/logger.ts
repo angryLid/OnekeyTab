@@ -1,15 +1,15 @@
 import { browser } from 'wxt/browser';
 import { LOG } from './constants';
-import type { LogIndex, LogIndexEntry, LogKind, RunRecord, SelectionRecord } from './types';
+import type { AnyLogRecord, LogIndex, LogIndexEntry, LogKind } from './types';
 
 /** Any record kind the log can store. */
-export type AnyLogRecord = RunRecord | SelectionRecord;
+export type { AnyLogRecord } from './types';
 
 /**
- * Developer-facing logs (two record kinds: `run` and `selection`).
+ * Developer-facing logs (three record kinds: `run`, `selection`, and `dedupe`).
  *
  * Layout: one lightweight index key plus one payload key per record
- * (`ai-tab-grouper:run:<id>`, shared by both kinds — ids are unique). The
+ * (`ai-tab-grouper:run:<id>`, shared by all kinds — ids are unique). The
  * index keeps a small projection (including each record's byte size) so the
  * log list page never loads full payloads; a single record is read on demand
  * when its details are opened. Stored size is capped (`LOG.maxTotalBytes`,
@@ -37,7 +37,7 @@ export function recordBytes(record: AnyLogRecord): number {
 }
 
 function entryFromRecord(record: AnyLogRecord): LogIndexEntry {
-  if ('tabs' in record) {
+  if ('selectedCount' in record) {
     return {
       id: record.id,
       kind: 'selection',
@@ -46,6 +46,18 @@ function entryFromRecord(record: AnyLogRecord): LogIndexEntry {
       durationMs: 0,
       tabCount: record.totalTabs,
       excludedCount: record.excludedCount,
+      bytes: recordBytes(record),
+    };
+  }
+  if ('plannedCloseCount' in record) {
+    return {
+      id: record.id,
+      kind: 'dedupe',
+      ts: record.ts,
+      outcome: 'success',
+      durationMs: 0,
+      tabCount: record.tabs.length,
+      closedCount: record.closedCount ?? record.plannedCloseCount,
       bytes: recordBytes(record),
     };
   }
@@ -96,7 +108,7 @@ async function loadIndex(): Promise<LogIndex> {
   const raw = (res[LOG.indexKey] as LogIndex | undefined) ?? null;
   if (raw && Array.isArray(raw.entries)) {
     // Indexes written before the selection log existed have no `kind`; they are runs.
-    return { entries: raw.entries.map((e) => ({ kind: 'run' as LogKind, ...e })), totalBytes: raw.totalBytes };
+    return { entries: raw.entries.map((e) => ({ ...e, kind: (e.kind ?? 'run') as LogKind })), totalBytes: raw.totalBytes };
   }
   return emptyIndex();
 }
@@ -105,7 +117,7 @@ async function saveIndex(index: LogIndex): Promise<void> {
   await browser.storage.local.set({ [LOG.indexKey]: index });
 }
 
-/** Per-record payload key prefix; shared by both record kinds (ids are unique). */
+/** Per-record payload key prefix; shared by all record kinds (ids are unique). */
 function runKey(id: string): string {
   return LOG.runKeyPrefix + id;
 }
@@ -143,6 +155,17 @@ async function removeIndexEntryOnly(id: string): Promise<void> {
   await saveIndex(removeFromIndex(index, id));
 }
 
+/** Overwrite an existing record (e.g. backfilling dedupe outcomes); appends it when unknown. */
+export async function updateLogRecord(record: AnyLogRecord): Promise<void> {
+  const index = await loadIndex();
+  if (!index.entries.some((e) => e.id === record.id)) {
+    await recordLog(record);
+    return;
+  }
+  const next = appendToIndex(removeFromIndex(index, record.id), record, LOG.maxTotalBytes);
+  await browser.storage.local.set({ [runKey(record.id)]: record, [LOG.indexKey]: next });
+}
+
 /** Drop a single record by id (payload + index entry). */
 export async function removeRecord(id: string): Promise<void> {
   await removeIndexEntryOnly(id);
@@ -157,10 +180,10 @@ export async function clearLog(): Promise<number> {
   return index.entries.length;
 }
 
-/** Most recent `window` records, newest first, reading only the index. */
+/** Most recent `window` records, newest first, reading only the index. Sorted by ts so a backfilled record (re-appended by updateLogRecord) stays in chronological display order. */
 export async function listRecent(window: number = LOG.listWindow): Promise<LogIndexEntry[]> {
   const index = await loadIndex();
-  return [...index.entries].reverse().slice(0, window);
+  return [...index.entries].sort((a, b) => b.ts - a.ts).slice(0, window);
 }
 
 /** Total count of recorded records (for the "clear all (N records)" labeling). */

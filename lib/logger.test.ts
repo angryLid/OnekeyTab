@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { LOG } from './constants';
 import { appendToIndex, newRunId, removeFromIndex } from './logger';
-import type { LogIndex, RunRecord, SelectionRecord } from './types';
+import type { DedupeRecord, LogIndex, RunRecord, SelectionRecord } from './types';
 
 function rec(overrides: Partial<RunRecord> = {}): RunRecord {
   return {
@@ -138,4 +138,39 @@ describe('removeFromIndex', () => {
 it('LOG.maxTotalBytes is within the default storage.local quota', () => {
   // Chrome's default storage.local quota is ~10MB; keep a clear margin.
   expect(LOG.maxTotalBytes).toBeLessThan(10 * 1024 * 1024);
+});
+
+function dedupeRec(overrides: Partial<DedupeRecord> = {}): DedupeRecord {
+  return {
+    id: newRunId(),
+    ts: 0,
+    windowId: 1,
+    params: { threshold: 0.75, weightPath: 0.7, weightQuery: 0.3, substituteCost: 2 },
+    tabs: [
+      { id: 1, url: 'https://a.com/x', title: 'A', lastAccessed: 2, role: 'baseline' },
+      { id: 2, url: 'https://a.com/x/?utm_source=t.co', title: 'B', lastAccessed: 1, role: 'closed', score: 1, baselineId: 1, outcome: 'removed' },
+    ],
+    plannedCloseCount: 1,
+    closedCount: 1,
+    ...overrides,
+  };
+}
+
+describe('appendToIndex (dedupe records)', () => {
+  it('projects a dedupe record into a dedupe entry with counts', () => {
+    const record = dedupeRec();
+    const index = appendToIndex({ entries: [], totalBytes: 0 }, record, 1_000_000);
+    expect(index.entries).toHaveLength(1);
+    const e = index.entries[0]!;
+    expect(e.kind).toBe('dedupe');
+    expect(e.tabCount).toBe(2);
+    expect(e.closedCount).toBe(1);
+    expect(e.bytes).toBe(JSON.stringify(record).length);
+  });
+
+  it('falls back to plannedCloseCount when outcomes were not backfilled yet', () => {
+    const record = dedupeRec({ closedCount: undefined });
+    const index = appendToIndex({ entries: [], totalBytes: 0 }, record, 1_000_000);
+    expect(index.entries[0]!.closedCount).toBe(1);
+  });
 });

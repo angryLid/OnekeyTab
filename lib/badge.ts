@@ -37,10 +37,21 @@ export async function setSkip(): Promise<void> {
   }, LIMITS.skipBadgeMs);
 }
 
+/** Flash "-N" (tabs closed by the dedupe pre-pass) for a few seconds, then clear. */
+export async function setClosedFlash(count: number): Promise<void> {
+  cancelSkipTimer();
+  await browser.action.setBadgeBackgroundColor({ color: BADGE_COLORS.skip });
+  await browser.action.setBadgeText({ text: `-${count}` });
+  skipTimer = setTimeout(() => {
+    skipTimer = null;
+    void clearBadge();
+  }, LIMITS.skipBadgeMs);
+}
+
 // On service worker cold start the in-flight flag is gone; any transient badge left behind ("…" or "✓") is an orphan and must be cleared. The red error badge is informational idle state and stays.
 export async function reconcileOnStartup(): Promise<void> {
   const text = await browser.action.getBadgeText({});
-  if (text === BADGE.pending || text === BADGE.skip) {
+  if (text === BADGE.pending || text === BADGE.skip || /^-\d+$/.test(text)) {
     await clearBadge();
   }
 }

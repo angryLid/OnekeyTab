@@ -3,6 +3,15 @@ export type ProviderId = 'openrouter';
 export interface Config {
   provider: ProviderId;
   apiKey: string;
+  /** Pre-group dedupe settings; absent in configs stored before the feature existed. */
+  dedupe?: DedupeConfig;
+}
+
+export interface DedupeConfig {
+  enabled: boolean;
+  threshold: number;
+  /** Manual override for including already-grouped tabs; undefined = auto (on when Vivaldi is detected). */
+  ignoreGrouped?: boolean;
 }
 
 export interface ModelTab {
@@ -43,9 +52,9 @@ export interface ApplyReport {
   failures: string[];
 }
 
-// ---- Logs (two record kinds share one index and byte cap) ----
+// ---- Logs (record kinds share one index and byte cap) ----
 
-export type LogKind = 'run' | 'selection';
+export type LogKind = 'run' | 'selection' | 'dedupe';
 
 export type RunOutcome = 'success' | 'skip' | 'error';
 
@@ -114,7 +123,55 @@ export interface RunRecord {
   calls?: RunCall[];
   /** Id of the selection audit record from the same click. */
   selectionId?: string;
+  /** Id of the dedupe record from the same click, when the pre-pass ran. */
+  dedupeId?: string;
 }
+
+// ---- Dedupe ----
+
+/** Scoring parameters snapshot stored per dedupe record so past decisions stay reproducible. */
+export interface DedupeParams {
+  threshold: number;
+  weightPath: number;
+  weightQuery: number;
+  substituteCost: number;
+  /** True when the `grouped` rule was skipped (Vivaldi, where native groups render nowhere). */
+  ignoreGrouped?: boolean;
+}
+
+export type DedupeTabRole = 'baseline' | 'closed' | 'ignored';
+
+export interface DedupeTabRecord {
+  id: number;
+  /** Full raw URL (including query and hash) so a closed tab can be recovered manually. */
+  url: string;
+  title: string;
+  lastAccessed: number;
+  role: DedupeTabRole;
+  /** Similarity to its baseline; present for closed tabs. */
+  score?: number;
+  /** Tab id of the baseline it was compared against; present for closed tabs. */
+  baselineId?: number;
+  /** Backfilled after tabs.remove resolves, from a fresh window query. */
+  outcome?: 'removed' | 'declined';
+}
+
+/** Dedupe record: which tabs the pre-pass compared, what it closed, and what actually died. */
+export interface DedupeRecord {
+  id: string;
+  ts: number;
+  windowId: number;
+  params: DedupeParams;
+  tabs: DedupeTabRecord[];
+  plannedCloseCount: number;
+  /** Backfilled after tabs.remove resolves; absent while only the plan is known. */
+  closedCount?: number;
+  /** Id of the run record from the same click, when one exists. */
+  runId?: string;
+}
+
+/** Any record kind the log can store. */
+export type AnyLogRecord = RunRecord | SelectionRecord | DedupeRecord;
 
 /** Lightweight projection stored in the index; a full record is read on demand. */
 export interface LogIndexEntry {
@@ -123,10 +180,12 @@ export interface LogIndexEntry {
   ts: number;
   outcome: RunOutcome;
   durationMs: number;
-  /** Run: model tabs. Selection: total tabs read. */
+  /** Run: model tabs. Selection: total tabs read. Dedupe: eligible tabs compared. */
   tabCount?: number;
   /** Selection only: how many of the read tabs were excluded. */
   excludedCount?: number;
+  /** Dedupe only: tabs closed (planned at write time, backfilled to actual after removal). */
+  closedCount?: number;
   model?: string;
   error?: string;
   /** Estimated serialized byte size of the full record, used for the cap. */

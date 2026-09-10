@@ -31,6 +31,38 @@ export const LIMITS = {
   skipBadgeMs: 2000,
 } as const;
 
+/**
+ * Dedupe scoring constants. Structural tuning knobs, deliberately not user-facing:
+ * only the toggle and the threshold are exposed in the settings UI.
+ */
+export const DEDUPE = {
+  weightPath: 0.7,
+  weightQuery: 0.3,
+  insertDeleteCost: 1,
+  substituteCost: 2,
+  threshold: 0.75,
+  minThreshold: 0.5,
+  maxThreshold: 0.95,
+  thresholdStep: 0.05,
+  trackingParams: [
+    'utm_source',
+    'utm_medium',
+    'utm_campaign',
+    'utm_term',
+    'utm_content',
+    'utm_id',
+    'fbclid',
+    'gclid',
+    'msclkid',
+    'dclid',
+    'spm',
+    'scm',
+    'igshid',
+    'si',
+    'share_source',
+  ],
+} as const;
+
 export const BADGE = {
   pending: '…',
   error: '✗',

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Browser } from 'wxt/browser';
 import { LIMITS } from './constants';
-import { auditSelection, firstExclusionReason, selectCandidates } from './selection';
+import { auditSelection, dedupeEligibilityReason, firstExclusionReason, selectCandidates } from './selection';
 
 function tab(overrides: Partial<Browser.tabs.Tab> & { id: number }): Browser.tabs.Tab {
   return {
@@ -56,6 +56,18 @@ describe('firstExclusionReason', () => {
     expect(firstExclusionReason(tab({ id: 3, groupId: 5, url: '' }))).toBe('grouped');
     expect(firstExclusionReason(tab({ id: 4, url: '' }))).toBe('no-url');
     expect(firstExclusionReason(tab({ id: 5, url: 'chrome://newtab/' }))).toBe('internal-url');
+    expect(firstExclusionReason(tab({ id: 6, url: 'vivaldi://policy/' }))).toBe('internal-url');
+  });
+});
+
+describe('dedupeEligibilityReason', () => {
+  it('ignores the grouped rule only when asked (Vivaldi exception)', () => {
+    const grouped = tab({ id: 1, groupId: 5, url: 'https://a.com/x' });
+    expect(dedupeEligibilityReason(grouped, true)).toBeNull();
+    expect(dedupeEligibilityReason(grouped, false)).toBe('grouped');
+    // Other rules still apply on Vivaldi.
+    expect(dedupeEligibilityReason(tab({ id: 2, pinned: true, url: 'https://a.com/x' }), true)).toBe('pinned');
+    expect(dedupeEligibilityReason(tab({ id: 3, url: 'chrome://newtab/' }), true)).toBe('internal-url');
   });
 });
 
