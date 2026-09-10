@@ -11,10 +11,11 @@ groups are created. One button, two states: idle and pending.
 1. Click the toolbar icon.
 2. **Dedupe pre-pass (default on, toggle in settings).** Eligible tabs (same rules as grouping:
    not pinned, not grouped, not browser-internal) in the current window are compared pairwise by
-   a local URL-similarity score — no model involved. Tabs are sorted newest-first; each tab is
-   compared against the current survivor anchor and closed when its score reaches the threshold
-   (default 0.75). The newest tab of each near-duplicate family survives. Closed tabs are logged
-   with full URLs so they can be recovered manually.
+   a local URL-similarity score — no model involved. Tabs are sorted newest-first; each
+   surviving tab is compared against every older tab, matches are closed and skipped, and the
+   next surviving tab becomes the next anchor (O(n²) worst case) — so the newest tab of each
+   near-duplicate family survives no matter how many unrelated tabs sit between duplicates.
+   Closed tabs are logged with full URLs so they can be recovered manually.
 3. The extension collects grouping candidates in the **current window only**: tabs that are not
    already in a group, not pinned, and not browser-internal pages (`about:`, `chrome://`, etc.),
    sorted by most recently accessed, capped at 50.

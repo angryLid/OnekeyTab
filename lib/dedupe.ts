@@ -94,40 +94,43 @@ export interface DedupePlan {
 }
 
 /**
- * Anchor pass over eligible tabs: sort by lastAccessed descending (id ascending as tie-break),
- * compare each tab against the current baseline, close it on score >= threshold, else promote it
- * to the new baseline. Each tab is compared exactly once; unparseable URLs are ignored and never
- * become a baseline. Pure — unit tested.
+ * Baseline-scan pass over eligible tabs, O(n^2) worst case: sort by lastAccessed descending
+ * (id ascending as tie-break); each surviving tab becomes a baseline and is compared against
+ * EVERY unmarked, parseable tab below it — any match at score >= threshold is marked closed
+ * and skipped afterwards; the next unmarked tab becomes the next baseline. This collapses each
+ * duplicate family to its newest member no matter how many unrelated tabs sit between them.
+ * Unparseable URLs are ignored: never closed, never a baseline. Pure — unit tested.
  */
 export function planDedupe(eligible: Browser.tabs.Tab[], threshold: number): DedupePlan {
   const sorted = [...eligible].sort(
     (a, b) => (b.lastAccessed ?? 0) - (a.lastAccessed ?? 0) || (a.id ?? 0) - (b.id ?? 0),
   );
+  // Normalize once per tab; null marks an unparseable URL.
+  const norms = sorted.map((tab) =>
+    typeof tab.url === 'string' && tab.url.length > 0 ? normalizeUrl(tab.url) : null,
+  );
   const entries: DedupeEntry[] = [];
   const closedIds: number[] = [];
-  let baseline: Browser.tabs.Tab | null = null;
-  let baselineNorm: NormalizedUrl | null = null;
-  for (const tab of sorted) {
-    const norm = typeof tab.url === 'string' && tab.url.length > 0 ? normalizeUrl(tab.url) : null;
-    const tabId = tab.id as number;
+  const closed = new Set<number>();
+  for (let i = 0; i < sorted.length; i++) {
+    const tabId = sorted[i]!.id as number;
+    const norm = norms[i];
+    if (closed.has(tabId)) continue;
     if (!norm) {
       entries.push({ tabId, role: 'ignored' });
       continue;
     }
-    if (!baseline || !baselineNorm) {
-      entries.push({ tabId, role: 'baseline' });
-      baseline = tab;
-      baselineNorm = norm;
-      continue;
-    }
-    const score = pairScore(baselineNorm, norm);
-    if (score >= threshold) {
-      entries.push({ tabId, role: 'closed', score: Math.round(score * 1000) / 1000, baselineId: baseline.id as number });
-      closedIds.push(tabId);
-    } else {
-      entries.push({ tabId, role: 'baseline' });
-      baseline = tab;
-      baselineNorm = norm;
+    entries.push({ tabId, role: 'baseline' });
+    for (let j = i + 1; j < sorted.length; j++) {
+      const otherId = sorted[j]!.id as number;
+      const otherNorm = norms[j];
+      if (closed.has(otherId) || !otherNorm) continue;
+      const score = pairScore(norm, otherNorm);
+      if (score >= threshold) {
+        entries.push({ tabId: otherId, role: 'closed', score: Math.round(score * 1000) / 1000, baselineId: tabId });
+        closedIds.push(otherId);
+        closed.add(otherId);
+      }
     }
   }
   return { entries, closedIds };

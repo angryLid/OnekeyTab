@@ -157,6 +157,47 @@ describe('planDedupe', () => {
     expect(plan.entries.every((e) => e.role === 'baseline' || e.score === 1)).toBe(true);
   });
 
+  it('closes duplicates sitting far below the anchor, not just adjacent ones (reported bug)', () => {
+    const plan = planDedupe(
+      [
+        tab({ id: 1, lastAccessed: 400, url: 'https://x.atlassian.net/browse/A-1' }),
+        tab({ id: 2, lastAccessed: 300, url: 'https://unrelated.com/' }),
+        tab({ id: 3, lastAccessed: 200, url: 'https://x.atlassian.net/browse/A-1' }),
+        tab({ id: 4, lastAccessed: 100, url: 'https://x.atlassian.net/browse/A-1' }),
+      ],
+      THRESHOLD,
+    );
+    expect(plan.closedIds).toEqual([3, 4]);
+    expect(plan.entries.map((e) => e.role)).toEqual(['baseline', 'closed', 'closed', 'baseline']);
+  });
+
+  it('never compares against a tab that a previous baseline already closed', () => {
+    const plan = planDedupe(
+      [
+        tab({ id: 1, lastAccessed: 400, url: 'https://a.com/p/1' }),
+        tab({ id: 2, lastAccessed: 300, url: 'https://a.com/p/2' }),
+        tab({ id: 3, lastAccessed: 200, url: 'https://a.com/p/1' }),
+      ],
+      THRESHOLD,
+    );
+    // Tab 3 is closed by baseline 1; baseline 2 must not claim or re-close it.
+    const closed3 = plan.entries.find((e) => e.tabId === 3);
+    expect(closed3).toMatchObject({ role: 'closed', baselineId: 1 });
+    expect(plan.closedIds).toEqual([3]);
+  });
+
+  it('logs each closed tab exactly once, grouped under its closing baseline', () => {
+    const plan = planDedupe(
+      [
+        tab({ id: 1, lastAccessed: 300, url: 'https://a.com/x?utm_source=t.co' }),
+        tab({ id: 2, lastAccessed: 200, url: 'https://a.com/x' }),
+      ],
+      THRESHOLD,
+    );
+    expect(plan.entries).toHaveLength(2);
+    expect(plan.entries.filter((e) => e.role === 'closed')).toHaveLength(1);
+  });
+
   it('respects the threshold parameter', () => {
     const tabs = [
       tab({ id: 1, lastAccessed: 200, url: 'https://en.wikipedia.org/wiki/Cat' }),

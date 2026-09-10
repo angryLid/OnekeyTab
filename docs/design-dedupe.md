@@ -64,12 +64,18 @@ Calibration (the blessed verdict table, encoded as fixtures in `lib/dedupe.test.
 The whole design's discrimination lives in the 0.70 (keep) → 0.77 (close) band; the threshold
 slider is coarse by nature, and 0.75 splits the band.
 
-## Clustering: anchor pass (`planDedupe`)
+## Clustering: baseline scan (`planDedupe`)
 
-Not transitive closure — an explicit anchor rule: sort eligible tabs by `lastAccessed`
-descending (id ascending as tie-break); the first tab is the baseline; each following tab is
-compared **only** against the current baseline — score ≥ threshold closes it, otherwise it
-becomes the new baseline. Exactly n−1 comparisons, each logged; deterministic and replayable.
+Not transitive closure — a baseline-scan rule, O(n²) worst case: sort eligible tabs by
+`lastAccessed` descending (id ascending as tie-break); each surviving tab becomes a baseline
+and is compared against every unmarked, parseable tab below it; matches at score ≥ threshold
+are marked closed and skipped afterwards; the next unmarked tab becomes the next baseline.
+Every duplicate family collapses to its newest member no matter how many unrelated tabs sit
+between them — the first shipped variant compared each tab against the current anchor only
+and missed exactly those cases (identical tabs separated by unrelated pages survived; fixed
+from a real-run log). Deterministic and replayable. The log records decisions (one entry per
+tab, grouped under its closing baseline with the comparison score), not every pairwise
+comparison — O(n²) comparison records would burn the 5 MB log cap.
 
 ## Pipeline order (per click)
 
