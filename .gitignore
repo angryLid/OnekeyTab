@@ -18,6 +18,7 @@ web-ext.config.ts
 .commandcode/
 .dsh/
 .pi/
+.pi-web/
 
 # Editor directories and files
 .vscode/*
