@@ -15,7 +15,7 @@ export const PROVIDERS: Record<ProviderId, Provider> = {
     label: 'OpenRouter',
     baseUrl: 'https://openrouter.ai/api/v1',
     chatPath: '/chat/completions',
-    model: 'openrouter/free',
+    model: 'xiaomi/mimo-v2.5',
     extraHeaders: { 'X-Title': 'AI Tab Grouper' },
   },
 };
@@ -25,8 +25,8 @@ export const LIMITS = {
   minCandidates: 3,
   titleMax: 200,
   nameMax: 24,
-  timeoutMs: 60_000,
-  maxTokens: 2000,
+  timeoutMs: 30_000,
+  maxTokens: 4000,
   temperature: 0.2,
   skipBadgeMs: 2000,
 } as const;
