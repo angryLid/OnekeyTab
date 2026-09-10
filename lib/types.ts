@@ -5,6 +5,8 @@ export interface Config {
   apiKey: string;
   /** Pre-group dedupe settings; absent in configs stored before the feature existed. */
   dedupe?: DedupeConfig;
+  /** Grouping write backend; configs stored before the feature read as 'auto'. */
+  groupingBackend?: GroupingBackend;
 }
 
 export interface DedupeConfig {
@@ -50,6 +52,28 @@ export interface ApplyReport {
   skipped: number;
   failed: number;
   failures: string[];
+  /** Which writer produced the report. */
+  backend: EffectiveBackend;
+}
+
+// ---- Vivaldi stacks ----
+
+export type GroupingBackend = 'auto' | 'native' | 'stacks';
+
+/** Backend actually used for a run; 'auto' resolves to one of these before anything is written. */
+export type EffectiveBackend = 'native' | 'stacks';
+
+export type StackProbeReason = 'write-rejected' | 'error';
+
+export interface StackProbeResult {
+  supported: boolean;
+  reason?: StackProbeReason;
+  detail?: string;
+}
+
+/** Probe outcome as stored on a run record. */
+export interface StackProbeRecord extends StackProbeResult {
+  ts: number;
 }
 
 // ---- Logs (record kinds share one index and byte cap) ----
@@ -59,7 +83,7 @@ export type LogKind = 'run' | 'selection' | 'dedupe';
 export type RunOutcome = 'success' | 'skip' | 'error';
 
 /** Why a read tab was not offered to the model; the first matching rule wins. */
-export type ExclusionReason = 'no-id' | 'pinned' | 'grouped' | 'no-url' | 'internal-url' | 'over-cap';
+export type ExclusionReason = 'no-id' | 'pinned' | 'stacked' | 'grouped' | 'no-url' | 'internal-url' | 'over-cap';
 
 /** One audited tab: what the extension read and whether a rule excluded it. */
 export interface AuditTab {
@@ -70,6 +94,8 @@ export interface AuditTab {
   pinned: boolean;
   /** Present only for tabs that are in a group (> 0). */
   groupId?: number;
+  /** Vivaldi stack id (vivExtData.group) when the tab is a visible stack member. */
+  stackId?: string;
   /** Present only for over-cap exclusions, where recency decides. */
   lastAccessed?: number;
   selected: boolean;
@@ -89,6 +115,8 @@ export interface SelectionRecord {
   excludedCount: number;
   /** Id of the run record from the same click, when one exists. */
   runId?: string;
+  /** Effective grouping backend for the click that produced this record. */
+  backend?: EffectiveBackend;
 }
 
 export interface RunCall {
@@ -125,6 +153,10 @@ export interface RunRecord {
   selectionId?: string;
   /** Id of the dedupe record from the same click, when the pre-pass ran. */
   dedupeId?: string;
+  /** Backend that applied (or attempted to apply) the plan. */
+  backend?: EffectiveBackend;
+  /** Stack capability probe outcome, present whenever the stacks backend was considered. */
+  stackProbe?: StackProbeRecord;
 }
 
 // ---- Dedupe ----

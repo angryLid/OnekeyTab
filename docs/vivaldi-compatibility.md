@@ -11,12 +11,15 @@ but the tab strip displayed no groups at all.
   silently fails.
 - Vivaldi replaces Chromium's native tab strip with its own UI and does not
   render native tab group visuals (colored capsules, collapse headers).
-- Vivaldi's own replacement feature, Tab Stacks, has no public extension
-  API, so an extension cannot create or control stacks.
-- Best achievable adaptation: full data-layer support (100%), zero native
-  visual support (0%). Workaround is to show grouping results in the
-  extension's own UI (side panel), optionally paired with a user-installed
-  Vivaldi UI mod that mirrors native groups into Tab Stacks.
+- UPDATE (post-Reddit research, see "The vivExtData stack bridge" below):
+  Tab Stacks have no *public* API, but there is a working *write path* —
+  `chrome.tabs.update(id, { vivExtData })` with `group` / `fixedGroupTitle` /
+  `groupColor` keys creates a real, visible stack (r/vivaldibrowser thread
+  1n5451s, corroborated by the TidyTabs / TidyTitles mods). Undocumented and
+  version-sensitive, so it needs a runtime capability probe and fallback.
+- Best achievable adaptation: full data-layer support (100%) plus, on Vivaldi,
+  real visible Tab Stacks via the vivExtData bridge — replacing the earlier
+  "side panel only + user-installed mod" workaround.
 
 ## Architecture: why the API works but the UI shows nothing
 
@@ -63,15 +66,81 @@ model changes, never a specific UI. Known community threads on this:
   sessions in its own format; whether native groupIds survive a restart
   has been reported as unreliable on the forums. Untested by us.
 
-## Tab Stacks: no API, dead end for extensions
+## Tab Stacks: no public API, but an undocumented write path exists
 
-Tab Stacks (and Workspaces) are not exposed to extensions at all. Feature
-requests exist but nothing has shipped:
+Tab Stacks (and Workspaces) have no public extension API. Feature requests
+exist but nothing official has shipped:
 
 - https://forum.vivaldi.net/topic/113989/api-for-activating-expanding-tab-groups-programmatically
 
-So an extension cannot create, name, collapse, or expand a stack. This is
-a hard wall as of Vivaldi 8.x.
+The original conclusion here was "hard wall". That was wrong at the data
+layer: a Reddit thread (r/vivaldibrowser 1n5451s, "Vivaldi Tab API
+documentation", Sep 2025) documents that writing `vivExtData` through
+`chrome.tabs.update` creates real stacks, and the same technique is in
+production use by community mods (TidyTabs converts grouping results into
+Tab Stacks; TidyTitles writes `fixedGroupTitle` for AI-generated stack
+names — Awesome-Vivaldi repo, Vivaldi 7.9 era).
+
+Key facts established across those sources:
+
+- Stack membership is `vivExtData.group`: a shared string id across member
+tabs (the Reddit code uses `crypto.randomUUID()`; the UI's own ids look
+like `tab-<ulid>`, format not validated as input).
+- `vivExtData.fixedGroupTitle` sets the stack name; `vivExtData.groupColor`
+uses `color1`–`color9` (empty string = unset).
+- Read-modify-write is mandatory: `vivExtData` carries unrelated state
+(`workspaceId`, `fixedTitle`, tiling layout, follower ids, `ext_id`) that
+must be preserved (Awesome-Vivaldi `Doc/mod/tabtree.md` field list).
+- `chrome.tabs.update` accepts `vivExtData` outside any documented schema;
+Vivaldi's UI re-renders the stack from the change.
+- Caveats: forum topic 113989 reports `chrome.tabs.query` returning an
+*empty* `vivExtData.group` for UI-created stacks on some versions, so read
+semantics differ from write semantics across builds; and mods run in the
+privileged UI context while our extension runs in a normal extension
+context — the Reddit thread claims the plain extension path works, but that
+is exactly what our capability probe must verify on each Vivaldi release.
+
+## The vivExtData stack bridge (planned adaptation)
+
+The full implementation design now lives in `docs/design-vivaldi-stacks.md` (backend
+matrix, capability probe, selection/dedupe rule changes, failure matrix, test and
+verification plans). The summary below stays as the original research sketch:
+Design for this codebase, replacing the previous "side panel only" plan:
+
+1. New module `lib/vivaldi-stacks.ts`:
+   - `parseVivExtData(tab)` / `applyVivExtDataKeys(vivExtData, { assign, deleteKeys })`
+     — safe JSON parse plus merge that preserves unknown keys.
+   - `stackTabs(tabs, title, color)` — one shared UUID in `group`, plus
+     `fixedGroupTitle` and `groupColor`, written per tab via
+     `chrome.tabs.update(tab.id, { vivExtData })`.
+   - `unstackTabs(tabs)` — delete `group` / `groupColor` / `fixedGroupTitle`.
+   - `mapPaletteColorToVivaldi(color)` — our tab-group palette (grey, blue,
+     red, yellow, green, pink, purple, cyan, orange) maps onto `color1`–`color9`.
+2. Capability probe before first use: detect tab-level `vivExtData` (see
+   `lib/vivaldi.ts`), write a stack, then read back and confirm the field
+   stuck; on mismatch fall back to native `chrome.tabs.group()` (data layer
+   still works everywhere) and record the failure in the log.
+3. Branch in `lib/apply-groups.ts`: on Vivaldi + probe success, replace
+   `browser.tabs.group()` + `browser.tabGroups.update()` with `stackTabs`.
+   Do not mix both: an invisible native groupId plus a stack on the same
+   tab is untested and confusing.
+4. Adjacency: Vivaldi stacks are usually contiguous; TidyTabs pairs the
+   data write with `chrome.tabs.move`. Verify whether scattered stacks
+   render correctly before deciding whether to move tabs.
+5. Event hygiene: `chrome.tabs.onUpdated` must ignore `vivExtData`-only
+   changes (no changeInfo.url/title) to avoid log spam and feedback loops.
+6. Settings: grouping backend = Auto / Native groups / Vivaldi stacks, so a
+   broken Vivaldi update can be worked around without shipping a fix.
+7. Verification logging (strategy item 5): after applying, re-query and log
+   the resulting `vivExtData.group` per tab, so "write dropped" vs "write
+   worked but UI stale" is distinguishable.
+
+Expected wins over the native-group path: stacks are visible, titled and
+colored in the real tab strip, and persist in Vivaldi's own session format
+(native groupIds surviving restart was already flagged as unverified).
+Risks to document: undocumented API (may change without notice), no
+extension-store policy issue since `chrome.tabs.update` is a standard
+surface, but Vivaldi version matrix must be re-tested per major release.
 
 ## Escape hatch: Vivaldi UI Modifications (user-side mod)
 
@@ -120,10 +189,12 @@ reliability becomes the perceived reliability of our grouping feature.
 
 | Layer | Status in Vivaldi 8.x |
 |---|---|
-| `chrome.tabs.group()` and data model | Works, reliable |
+| `chrome.tabs.group()` and data model | Works, reliable, but invisible |
 | Native tab group UI rendering | Not rendered (by design) |
-| Tab Stacks extension API | Does not exist |
-| UI Modifications mod bridge | Possible, user-installed, unofficial |
+| Tab Stacks extension API (public) | Does not exist |
+| Tab Stacks via `vivExtData` write | Works per community code; undocumented, probe + fallback required |
+| UI Modifications mod bridge | Possible, user-installed, unofficial — now optional instead of required |
+| Stack persistence across restart | Expected (Vivaldi's own session format), verify on 8.x |
 | Native group persistence across restart | Unverified, forum reports of loss |
 
 ## Implemented adaptation: dedupe exception (this codebase)
@@ -160,6 +231,7 @@ The dedupe pre-pass (see `docs/design-dedupe.md`) now adapts to Vivaldi:
   investigation is now visible in the logs, as recommended in strategy item 5 above. A settings
   override (Auto / Always include / Never include) covers a fully-masked Vivaldi where neither
   signal fires.
-- Grouping candidate selection is unchanged on Vivaldi (already-grouped tabs are not re-sent to
-  the model); invisible groups keep accumulating until a native-UI bridge (UI Modifications mod,
-  side panel, strategy items 2/4) is built.
+- Grouping candidate selection now mirrors the dedupe exception on Vivaldi: native groupIds
+  are untrusted (invisible, possibly stale) and no longer exclude tabs from candidates or
+  re-grouping; visible stack members (`vivExtData.group`) remain excluded. See
+  `docs/design-vivaldi-stacks.md` for the full stack-bridge design.

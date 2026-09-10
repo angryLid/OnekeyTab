@@ -1,4 +1,4 @@
-import { applyPlans } from '@/lib/apply-groups';
+import { applyPlans, stackApi } from '@/lib/apply-groups';
 import { clearBadge, setClosedFlash, setError, setPending, setSkip, reconcileOnStartup } from '@/lib/badge';
 import { clearLastError, getConfig, setLastError } from '@/lib/config';
 import { DEDUPE, LIMITS } from '@/lib/constants';
@@ -10,8 +10,9 @@ import { parsePlan } from '@/lib/parse-groups';
 import { buildMessages, buildRetryMessages } from '@/lib/prompt';
 import { auditSelection, dedupeEligibilityReason } from '@/lib/selection';
 import { describeVivaldiSignals } from '@/lib/vivaldi';
+import { probeStackSupport } from '@/lib/vivaldi-stacks';
 import type { Browser } from 'wxt/browser';
-import type { DedupeRecord, DedupeTabRecord, RunCall, RunRecord, SelectionRecord } from '@/lib/types';
+import type { DedupeRecord, DedupeTabRecord, EffectiveBackend, RunCall, RunRecord, SelectionRecord } from '@/lib/types';
 
 const LOG_PREFIX = '[ai-tab-grouper]';
 
@@ -52,25 +53,43 @@ export default defineBackground(() => {
     // getConfig merges defaults, so dedupe settings are always present at runtime.
     const dedupeConfig = config.dedupe ?? { enabled: true, threshold: DEDUPE.threshold };
     try {
+      // Detection is browser-wide and feeds both the dedupe exception and the backend choice,
+      // so it runs once regardless of the dedupe toggle. Vivaldi-ness is a property of the
+      // browser, and window/tab signals may live in any window, not just this one.
+      const [allTabs, allWindows] = await Promise.all([browser.tabs.query({}), browser.windows.getAll()]);
+      const vivaldiSignals = describeVivaldiSignals(allTabs, navigator, allWindows);
+      const isVivaldi = vivaldiSignals.signals.length > 0;
+      if (isVivaldi) console.log(`${LOG_PREFIX} Vivaldi detected via: ${vivaldiSignals.signals.join(', ')}`);
+
+      // Backend matrix: 'auto' = stacks on Vivaldi when the capability probe passes, native
+      // everywhere else. Forced 'stacks' bypasses the probe cache every run so a broken probe
+      // stays diagnosable instead of silently cached. The probe creates and removes its own
+      // about:blank tab before the window query below, so it never enters dedupe/selection.
+      const setting = config.groupingBackend ?? 'auto';
+      let backend: EffectiveBackend = 'native';
+      if (setting === 'stacks' || isVivaldi) {
+        const probe = await probeStackSupport(stackApi(), setting === 'stacks');
+        record.stackProbe = { ...probe, ts: Date.now() };
+        if (probe.supported) backend = 'stacks';
+        else console.warn(`${LOG_PREFIX} Stack backend unavailable (${probe.reason}${probe.detail ? `: ${probe.detail}` : ''}); native groups will be used.`);
+      }
+      record.backend = backend;
+
       const tabs = await browser.tabs.query({ windowId });
       let workingTabs = tabs;
       let dedupeClosed = 0;
       if (dedupeConfig.enabled) {
         // Manual override wins; otherwise auto-detect Vivaldi, whose native tab groups render nowhere.
-        // Detection is browser-wide: Vivaldi-ness is a property of the browser, and window/
-        // tab signals may live in any window, not just this one.
-        const [allTabs, allWindows] = await Promise.all([browser.tabs.query({}), browser.windows.getAll()]);
-        const vivaldiSignals = describeVivaldiSignals(allTabs, navigator, allWindows);
-        if (vivaldiSignals.signals.length > 0) {
-          console.log(`${LOG_PREFIX} Vivaldi detected via: ${vivaldiSignals.signals.join(', ')}`);
-        }
-        const ignoreGrouped = dedupeConfig.ignoreGrouped ?? vivaldiSignals.signals.length > 0;
+        const ignoreGrouped = dedupeConfig.ignoreGrouped ?? isVivaldi;
         dedupeClosed = await runDedupe(record, tabs, dedupeConfig.threshold, windowId, ignoreGrouped);
         if (dedupeClosed > 0) workingTabs = await browser.tabs.query({ windowId });
       }
-      const audit = auditSelection(workingTabs);
+      // Vivaldi's groupId is not trustworthy (invisible and possibly stale), so on Vivaldi it
+      // never gates candidacy or re-grouping — the dedupe exception, generalized to the whole
+      // pipeline. Chrome keeps trusting groupId so user-made groups are not disturbed.
+      const audit = auditSelection(workingTabs, { treatNativeGroupedAsUngrouped: isVivaldi });
       const candidates = audit.candidates;
-      record.selectionId = await persistSelection(audit, windowId, record.id);
+      record.selectionId = await persistSelection(audit, windowId, record.id, backend);
       console.log(`${LOG_PREFIX} ${candidates.length} candidate tabs in window ${windowId}`);
       if (candidates.length < LIMITS.minCandidates) {
         console.log(`${LOG_PREFIX} Skipped: fewer than ${LIMITS.minCandidates} candidates`);
@@ -128,9 +147,9 @@ export default defineBackground(() => {
       }
 
       console.log(`${LOG_PREFIX} Plan: ${plans.length} groups`, plans);
-      const report = await applyPlans(plans, windowId);
+      const report = await applyPlans(plans, windowId, backend, { treatGroupedAsUngrouped: isVivaldi });
       console.log(
-        `${LOG_PREFIX} Applied ${report.applied}, skipped ${report.skipped}, failed ${report.failed}`,
+        `${LOG_PREFIX} Applied ${report.applied}, skipped ${report.skipped}, failed ${report.failed} via ${report.backend}`,
         report.failures,
       );
       await clearLastError();
@@ -241,6 +260,7 @@ export default defineBackground(() => {
     audit: ReturnType<typeof auditSelection>,
     windowId: number,
     runId: string,
+    backend: EffectiveBackend,
   ): Promise<string | undefined> {
     const selected = audit.tabs.filter((t) => t.selected);
     const selection: SelectionRecord = {
@@ -252,6 +272,7 @@ export default defineBackground(() => {
       selectedCount: selected.length,
       excludedCount: audit.tabs.length - selected.length,
       runId,
+      backend,
     };
     try {
       await recordLog(selection);

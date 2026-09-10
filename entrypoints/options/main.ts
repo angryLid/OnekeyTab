@@ -4,7 +4,7 @@ import { verifyApiKey } from '@/lib/llm';
 import { DEDUPE, LOG } from '@/lib/constants';
 import { clearLog, countRecords, getRecord, listRecent } from '@/lib/logger';
 import type { AnyLogRecord } from '@/lib/logger';
-import type { AuditTab, DedupeRecord, ExclusionReason, LogIndexEntry, LogKind, RunRecord, SelectionRecord } from '@/lib/types';
+import type { AuditTab, DedupeRecord, ExclusionReason, GroupingBackend, LogIndexEntry, LogKind, RunRecord, SelectionRecord } from '@/lib/types';
 
 const input = document.querySelector<HTMLInputElement>('#api-key')!;
 const saveButton = document.querySelector<HTMLButtonElement>('#save')!;
@@ -15,6 +15,9 @@ const dedupeThresholdValue = document.querySelector<HTMLSpanElement>('#dedupe-th
 const dedupeIgnoreGrouped = document.querySelector<HTMLSelectElement>('#dedupe-ignore-grouped')!;
 const saveDedupeButton = document.querySelector<HTMLButtonElement>('#save-dedupe')!;
 const dedupeStatus = document.querySelector<HTMLParagraphElement>('#dedupe-status')!;
+const groupingBackend = document.querySelector<HTMLSelectElement>('#grouping-backend')!;
+const saveBackendButton = document.querySelector<HTMLButtonElement>('#save-backend')!;
+const backendStatus = document.querySelector<HTMLParagraphElement>('#backend-status')!;
 const errorSection = document.querySelector<HTMLElement>('#panel-settings-error')!;
 const lastError = document.querySelector<HTMLParagraphElement>('#last-error')!;
 const lastErrorTime = document.querySelector<HTMLParagraphElement>('#last-error-time')!;
@@ -34,6 +37,7 @@ async function initSettings(): Promise<void> {
   dedupeThreshold.value = String(dedupe.threshold);
   dedupeIgnoreGrouped.value = dedupe.ignoreGrouped == null ? 'auto' : dedupe.ignoreGrouped ? 'always' : 'never';
   renderThresholdLabel();
+  groupingBackend.value = config?.groupingBackend ?? 'auto';
 
   const error = await getLastError();
   if (error) {
@@ -63,6 +67,7 @@ saveDedupeButton.addEventListener('click', async () => {
         // 'auto' stores as absent so the Vivaldi runtime detection decides.
         ignoreGrouped: ignoreGroupedValue === 'auto' ? undefined : ignoreGroupedValue === 'always',
       },
+      groupingBackend: existing?.groupingBackend,
     });
     dedupeStatus.textContent = 'Dedupe settings saved.';
     dedupeStatus.className = 'ok';
@@ -71,6 +76,26 @@ saveDedupeButton.addEventListener('click', async () => {
     dedupeStatus.className = 'error';
   } finally {
     saveDedupeButton.disabled = false;
+  }
+});
+
+saveBackendButton.addEventListener('click', async () => {
+  saveBackendButton.disabled = true;
+  try {
+    const existing = await getConfig();
+    await setConfig({
+      provider: existing?.provider ?? 'openrouter',
+      apiKey: existing?.apiKey ?? '',
+      dedupe: existing?.dedupe,
+      groupingBackend: groupingBackend.value as GroupingBackend,
+    });
+    backendStatus.textContent = 'Backend saved.';
+    backendStatus.className = 'ok';
+  } catch (e) {
+    backendStatus.textContent = `Save failed: ${(e as Error).message}`;
+    backendStatus.className = 'error';
+  } finally {
+    saveBackendButton.disabled = false;
   }
 });
 
@@ -85,7 +110,7 @@ saveButton.addEventListener('click', async () => {
   try {
     await verifyApiKey(apiKey);
     const existing = await getConfig();
-    await setConfig({ provider: 'openrouter', apiKey, dedupe: existing?.dedupe });
+    await setConfig({ provider: 'openrouter', apiKey, dedupe: existing?.dedupe, groupingBackend: existing?.groupingBackend });
     setStatus('API key verified — saved.', 'ok');
     errorSection.hidden = true;
   } catch (e) {
@@ -109,6 +134,7 @@ function activateTab(name: 'settings' | 'logs'): void {
   document.querySelector<HTMLElement>('#panel-settings-privacy')!.hidden = isLogs;
   document.querySelector<HTMLElement>('#panel-settings-security')!.hidden = isLogs;
   document.querySelector<HTMLElement>('#panel-settings-dedupe')!.hidden = isLogs;
+  document.querySelector<HTMLElement>('#panel-settings-stacks')!.hidden = isLogs;
   // The error section keeps its own visibility; only force-hidden while on Logs.
   document.querySelector<HTMLElement>('#panel-settings-error')!.hidden = isLogs ? true : errorSection.hidden;
   document.querySelector<HTMLElement>('#panel-logs')!.hidden = !isLogs;
@@ -219,6 +245,11 @@ function renderDetail(detail: HTMLDivElement, record: RunRecord): void {
   if (record.reason) parts.push(`<p class="muted">${escapeHtml(record.reason)}</p>`);
   if (record.error) parts.push(`<p class="error">${escapeHtml(record.error)}</p>`);
   if (record.windowId != null) parts.push(`<p class="muted">window ${record.windowId} · total ${record.durationMs}ms</p>`);
+  if (record.backend) {
+    const probe = record.stackProbe;
+    const probeLabel = probe == null ? '' : probe.supported ? ' · stack probe ok' : ` · stack probe failed (${escapeHtml(probe.reason ?? 'unknown')})`;
+    parts.push(`<p class="muted">backend ${record.backend}${probeLabel}</p>`);
+  }
   if (record.calls?.length) {
     record.calls.forEach((call, i) => {
       parts.push(
@@ -319,6 +350,7 @@ function renderDedupeDetail(detail: HTMLDivElement, record: DedupeRecord): void 
 const REASON_LABELS: Record<ExclusionReason, string> = {
   'no-id': 'no tab id',
   pinned: 'pinned',
+  stacked: 'in a Vivaldi stack',
   grouped: 'already grouped',
   'no-url': 'no url',
   'internal-url': 'internal url',
@@ -328,7 +360,9 @@ const REASON_LABELS: Record<ExclusionReason, string> = {
 function reasonLabel(tab: AuditTab): string {
   if (!tab.reason) return '';
   const base = REASON_LABELS[tab.reason];
-  return tab.reason === 'grouped' && tab.groupId != null ? `${base} (group ${tab.groupId})` : base;
+  if (tab.reason === 'grouped' && tab.groupId != null) return `${base} (group ${tab.groupId})`;
+  if (tab.reason === 'stacked' && tab.stackId != null) return `${base} (${tab.stackId})`;
+  return base;
 }
 
 function renderSelectionDetail(detail: HTMLDivElement, record: SelectionRecord): void {

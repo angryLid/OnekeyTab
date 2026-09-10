@@ -3,7 +3,7 @@ import type { Browser } from 'wxt/browser';
 import { LIMITS } from './constants';
 import { auditSelection, dedupeEligibilityReason, firstExclusionReason, selectCandidates } from './selection';
 
-function tab(overrides: Partial<Browser.tabs.Tab> & { id: number }): Browser.tabs.Tab {
+function tab(overrides: Partial<Browser.tabs.Tab> & { id: number; vivExtData?: unknown }): Browser.tabs.Tab {
   return {
     pinned: false,
     groupId: -1,
@@ -58,6 +58,13 @@ describe('firstExclusionReason', () => {
     expect(firstExclusionReason(tab({ id: 5, url: 'chrome://newtab/' }))).toBe('internal-url');
     expect(firstExclusionReason(tab({ id: 6, url: 'vivaldi://policy/' }))).toBe('internal-url');
   });
+
+  it('reports stacked before grouped so a visible stack member is never the droppable grouped case', () => {
+    const stacked = tab({ id: 7, groupId: 5, vivExtData: '{"group":"s-1","workspaceId":3}' });
+    expect(firstExclusionReason(stacked)).toBe('stacked');
+    // A stack member without a native groupId is stacked too.
+    expect(firstExclusionReason(tab({ id: 8, vivExtData: '{"group":"s-1"}' }))).toBe('stacked');
+  });
 });
 
 describe('dedupeEligibilityReason', () => {
@@ -68,6 +75,12 @@ describe('dedupeEligibilityReason', () => {
     // Other rules still apply on Vivaldi.
     expect(dedupeEligibilityReason(tab({ id: 2, pinned: true, url: 'https://a.com/x' }), true)).toBe('pinned');
     expect(dedupeEligibilityReason(tab({ id: 3, url: 'chrome://newtab/' }), true)).toBe('internal-url');
+  });
+
+  it('never ignores the stacked rule: closing a duplicate would visibly shrink a stack', () => {
+    const stacked = tab({ id: 4, groupId: 5, vivExtData: '{"group":"s-1"}' });
+    expect(dedupeEligibilityReason(stacked, true)).toBe('stacked');
+    expect(dedupeEligibilityReason(stacked, false)).toBe('stacked');
   });
 });
 
@@ -107,5 +120,21 @@ describe('auditSelection', () => {
     const audit = auditSelection(tabs);
     expect(audit.candidates).toEqual(selectCandidates(tabs));
     expect(audit.tabs.filter((t) => t.selected)).toHaveLength(audit.candidates.length);
+  });
+
+  it('treats native grouped tabs as ungrouped only when asked (Vivaldi: groupIds are untrusted)', () => {
+    const tabs = [
+      tab({ id: 1, groupId: 7 }),
+      tab({ id: 2, groupId: 7, vivExtData: '{"group":"s-1"}' }),
+      tab({ id: 3 }),
+    ];
+    const options = { treatNativeGroupedAsUngrouped: true };
+    const audit = auditSelection(tabs, options);
+    // Invisible native group re-enters candidacy; the visible stack member stays excluded.
+    expect(audit.candidates.map((t) => t.id)).toEqual([1, 3]);
+    expect(audit.candidates).toEqual(selectCandidates(tabs, options));
+    const byId = new Map(audit.tabs.map((t) => [t.id, t]));
+    expect(byId.get(1)).toMatchObject({ selected: true, groupId: 7 });
+    expect(byId.get(2)).toMatchObject({ selected: false, reason: 'stacked', stackId: 's-1' });
   });
 });
