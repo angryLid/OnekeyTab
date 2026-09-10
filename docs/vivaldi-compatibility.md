@@ -130,10 +130,25 @@ reliability becomes the perceived reliability of our grouping feature.
 
 The dedupe pre-pass (see `docs/design-dedupe.md`) now adapts to Vivaldi:
 
-- `lib/vivaldi.ts` detects Vivaldi at runtime: primarily the `vivExtData` (legacy `exData`)
-  property Vivaldi injects into every `chrome.tabs.Tab` returned to extensions — masking-proof;
-  secondarily UA-CH brands and the UA string, which only match when the user opted in to
-  branding (Vivaldi masks both by default, see the official help page linked above).
+- `lib/vivaldi.ts` detects Vivaldi at runtime with five signals, in priority order:
+  1. **Window-object field** — since ~Vivaldi 6.7 (2024-05) Vivaldi removed the tab-level field
+     and now injects `vivExtData` (legacy `extData`) into each `chrome.windows.Window` object
+     instead (SO 68659729 comment by woxxom; Violentmonkey's `src/background/utils/ua.js`
+     `checkVivaldi(wnd)` uses exactly this and is the production-grade precedent).
+  2. **Tab-object fields** — `vivExtData` (current, a JSON string), `exData`, and the pre-5.3
+     `extData` alias, which Vivaldi injected into every `chrome.tabs.Tab` before 6.7
+     (SO 68659729, chrome-otto-tabs PR #11). Kept for older builds; no longer fires on 6.7+.
+  3. **Vivaldi-specific tab URLs** — the `vivaldi://` scheme, the fake `chrome://vivaldi-webui/`
+     URL the web UI reports for the start page / new tab (forum topic 87056,
+     w3c/webextensions#470; Opera's equivalent is `chrome://startpageshared/`), and the internal
+     UI extension origins `chrome-extension://mpognobbkildjkofajifpdfhcoklimli/` (current) and
+     `chrome-extension://mpognobbkildjkoffnifgbdaajjmofk/` (pre-5.x builds).
+  4. **UA-CH brands** and 5. **UA string** — only match when the user opted in to branding
+     (Vivaldi masks both by default, see the official help page linked above).
+  Signals 1–3 survive brand masking. Detection is browser-wide (all windows queried), since
+  Vivaldi-ness is a browser property and the per-window signals may live elsewhere.
+  `describeVivaldiSignals` returns which probes fired; the background log prints them
+  (`Vivaldi detected via: …`) so a missed detection is diagnosable from the log.
 - On Vivaldi only, the dedupe eligibility chain (`lib/selection.ts` →
   `dedupeEligibilityReason`) drops the `grouped` rule: tabs carrying an invisible groupId
   participate in dedupe and can be closed. Closing a grouped tab just shrinks an unrendered

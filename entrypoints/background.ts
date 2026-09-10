@@ -9,7 +9,7 @@ import { toModelTabs } from '@/lib/model-input';
 import { parsePlan } from '@/lib/parse-groups';
 import { buildMessages, buildRetryMessages } from '@/lib/prompt';
 import { auditSelection, dedupeEligibilityReason } from '@/lib/selection';
-import { isVivaldi } from '@/lib/vivaldi';
+import { describeVivaldiSignals } from '@/lib/vivaldi';
 import type { Browser } from 'wxt/browser';
 import type { DedupeRecord, DedupeTabRecord, RunCall, RunRecord, SelectionRecord } from '@/lib/types';
 
@@ -57,7 +57,14 @@ export default defineBackground(() => {
       let dedupeClosed = 0;
       if (dedupeConfig.enabled) {
         // Manual override wins; otherwise auto-detect Vivaldi, whose native tab groups render nowhere.
-        const ignoreGrouped = dedupeConfig.ignoreGrouped ?? isVivaldi(tabs);
+        // Detection is browser-wide: Vivaldi-ness is a property of the browser, and window/
+        // tab signals may live in any window, not just this one.
+        const [allTabs, allWindows] = await Promise.all([browser.tabs.query({}), browser.windows.getAll()]);
+        const vivaldiSignals = describeVivaldiSignals(allTabs, navigator, allWindows);
+        if (vivaldiSignals.signals.length > 0) {
+          console.log(`${LOG_PREFIX} Vivaldi detected via: ${vivaldiSignals.signals.join(', ')}`);
+        }
+        const ignoreGrouped = dedupeConfig.ignoreGrouped ?? vivaldiSignals.signals.length > 0;
         dedupeClosed = await runDedupe(record, tabs, dedupeConfig.threshold, windowId, ignoreGrouped);
         if (dedupeClosed > 0) workingTabs = await browser.tabs.query({ windowId });
       }
