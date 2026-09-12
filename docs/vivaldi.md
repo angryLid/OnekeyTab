@@ -29,8 +29,9 @@ Tab Stacks have no extension API. Two channels create real ones:
 
 The extension's route is **StackBridge**: a mod, maintained in the author's Awesome-Vivaldi
 fork, that runs in `window.html` and wraps Channel A behind a versioned JSON-RPC protocol
-(`chrome.runtime.onMessageExternal`, envelope v1, actions `bridge.ping` / `bridge.capabilities`
-/ `stacks.list` / `stacks.create` for this client). Its design rationale, security model
+(`chrome.runtime.onMessageExternal`, envelope v2, actions `bridge.ping` / `bridge.capabilities`
+/ `stacks.list` for reads and the declarative `layout.apply` for writes; every v1 action
+remains served for rollback). Its design rationale, security model
 (dev build ships **unauthenticated**; sender-id pairing is planned), protocol reference, and
 install instructions live upstream and are frozen from this side:
 

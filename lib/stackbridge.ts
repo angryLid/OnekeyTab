@@ -6,9 +6,13 @@ import type { GroupingPort } from './grouping-port';
 import type { ApplyReport, GroupInfo, GroupPlan, PortCaps, PortProbeResult } from './types';
 
 /**
- * Client for the StackBridge mod protocol (envelope v1) — see the frozen upstream docs:
+ * Client for the StackBridge mod protocol (envelope v2) — see the frozen upstream docs:
  * github.com/angryLid/Awesome-Vivaldi Bridge/README.md + Bridge/API.md. This file is the sole
  * consumer of that protocol; nothing else in the codebase may grow a second one.
+ *
+ * Writes go through the v2 declarative layout.apply: the mod computes the diff and
+ * orchestrates everything in one locked, idempotent pass, so worker restarts and retries
+ * can never tear a grouping run into a wrong intermediate state.
  */
 
 export const DEFAULT_UI_EXTENSION_ID = BRIDGE.defaultUiExtensionId;
@@ -126,7 +130,7 @@ async function runProbe(api: BridgeApi, extId: string): Promise<PortProbeResult>
     if (caps.protocol !== BRIDGE.protocolVersion) {
       return { ok: false, reason: 'unsupported', detail: `bridge speaks protocol ${String(caps.protocol)}` };
     }
-    const missing = ['stacks.list', 'stacks.create'].filter((action) => !(caps.actions ?? []).includes(action));
+    const missing = ['stacks.list', 'layout.apply'].filter((action) => !(caps.actions ?? []).includes(action));
     if (missing.length > 0) {
       return { ok: false, reason: 'unsupported', detail: `bridge lacks actions: ${missing.join(', ')}` };
     }
@@ -177,7 +181,38 @@ export async function listStacks(api: BridgeApi, extId: string, windowId?: numbe
   return groups;
 }
 
-/** stacks.create; the 50-char cap is enforced here so log names always match stack names. */
+/** layout.apply result slice the port consumes. */
+interface BridgeLayoutResult {
+  rev?: unknown;
+  applied?: unknown;
+  dissolved?: unknown;
+  skipped?: unknown;
+}
+
+/**
+ * layout.apply: the whole desired layout in one declarative call. Idempotent — groups already
+ * in the requested state come back flagged unchanged and cost nothing; re-sending after a
+ * partial failure converges. `ungrouped` tabs are forced out of any stack.
+ */
+export async function applyLayout(
+  api: BridgeApi,
+  extId: string,
+  groups: Array<{ name: string; tabIds: number[] }>,
+  ungrouped?: number[],
+): Promise<BridgeLayoutResult> {
+  return callBridge<BridgeLayoutResult>(
+    api,
+    extId,
+    'layout.apply',
+    {
+      groups: groups.map((g) => ({ name: g.name.slice(0, BRIDGE.nameMax), tabIds: g.tabIds })),
+      ...(ungrouped && ungrouped.length > 0 ? { ungrouped } : {}),
+    },
+    BRIDGE.layoutTimeoutMs,
+  );
+}
+
+/** stacks.create (v1 action, still served); kept for rollback and manual probing. */
 export async function createStack(api: BridgeApi, extId: string, tabIds: number[], name: string): Promise<string> {
   const result = await callBridge<{ groupExtId?: string }>(
     api,
@@ -251,20 +286,29 @@ export function createBridgePort(
         }
       }
 
+      // One declarative call for the whole run: the mod diffs, orchestrates, and reports
+      // per-group outcomes. Groups whose live membership drops below two tabs are skipped
+      // client-side; unmentioned tabs and stacks stay untouched (same as the old v1 loop).
+      const groups: Array<{ name: string; tabIds: number[] }> = [];
       for (const plan of plans) {
         const tabIds = plan.tabIds.filter((tabId) => live.has(tabId));
         if (tabIds.length < 2) {
           report.skipped++;
           continue;
         }
-        try {
-          await createStack(api, uiExtensionId, tabIds, plan.name);
-          report.applied++;
-        } catch (e) {
-          // No mid-run rescue: the plan fails with a log entry, the next run re-probes (docs/grouping-port.md).
-          report.failed++;
-          report.failures.push(`Stack "${plan.name}": ${describeBridgeError(e)}`);
-        }
+        groups.push({ name: plan.name, tabIds });
+      }
+      if (groups.length === 0) return report;
+      try {
+        const result = await applyLayout(api, uiExtensionId, groups);
+        const appliedList = Array.isArray(result.applied) ? (result.applied as Array<{ unchanged?: boolean }>) : [];
+        report.applied = appliedList.length;
+        report.skipped += Array.isArray(result.skipped) ? result.skipped.length : 0;
+      } catch (e) {
+        // Transactional failure: nothing is rescued mid-run; the next run re-probes and the
+        // declarative re-send converges (docs/grouping-port.md).
+        report.failed = groups.length;
+        report.failures.push(`layout.apply failed: ${describeBridgeError(e)}`);
       }
       return report;
     },

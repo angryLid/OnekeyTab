@@ -40,21 +40,29 @@ function fakeApi(handler: (message: Record<string, unknown>) => unknown): { api:
   };
 }
 
-function happyApi(overrides: { stacks?: unknown[]; createError?: { code: string; message: string } } = {}) {
+function happyApi(overrides: { stacks?: unknown[]; layoutError?: { code: string; message: string } } = {}) {
   return fakeApi((message) => {
     const action = String(message.action);
     if (action === 'bridge.ping') return ok(String(message.id), { pong: true, protocol: BRIDGE.protocolVersion });
     if (action === 'bridge.capabilities') {
       return ok(String(message.id), {
         protocol: BRIDGE.protocolVersion,
-        actions: ['bridge.ping', 'bridge.capabilities', 'stacks.list', 'stacks.create'],
+        versions: [1, BRIDGE.protocolVersion],
+        actions: ['bridge.ping', 'bridge.capabilities', 'stacks.list', 'stacks.create', 'layout.apply'],
       });
     }
     if (action === 'stacks.list') return ok(String(message.id), overrides.stacks ?? []);
-    if (action === 'stacks.create') {
-      if (overrides.createError) return errResp(String(message.id), overrides.createError.code, overrides.createError.message);
-      return ok(String(message.id), { groupExtId: 'g-1' });
+    if (action === 'layout.apply') {
+      if (overrides.layoutError) return errResp(String(message.id), overrides.layoutError.code, overrides.layoutError.message);
+      const groups = (message.params as { groups: Array<{ name: string; tabIds: number[] }> }).groups;
+      return ok(String(message.id), {
+        rev: 1,
+        applied: groups.map((g) => ({ name: g.name, groupExtId: `g-${g.name}`, tabIds: g.tabIds })),
+        dissolved: [],
+        skipped: [],
+      });
     }
+    if (action === 'stacks.create') return ok(String(message.id), { groupExtId: 'g-1' });
     return errResp(String(message.id), 'INTERNAL', `unexpected action ${action}`);
   });
 }
@@ -120,6 +128,24 @@ describe('probeBridge', () => {
     expect(result).toMatchObject({ ok: false, reason: 'unsupported', detail: expect.stringContaining('protocol 99') });
   });
 
+  it('rejects a v1-only bridge (protocol 1 reported)', async () => {
+    const { api } = fakeApi((message) => {
+      if (message.action === 'bridge.capabilities') return ok(String(message.id), { protocol: 1, versions: [1], actions: ['bridge.ping', 'stacks.list', 'stacks.create', 'layout.apply'] });
+      return ok(String(message.id));
+    });
+    const result = await probeBridge(api, UI_ID, true);
+    expect(result).toMatchObject({ ok: false, reason: 'unsupported', detail: expect.stringContaining('protocol 1') });
+  });
+
+  it('rejects a protocol-2 bridge lacking layout.apply', async () => {
+    const { api } = fakeApi((message) => {
+      if (message.action === 'bridge.capabilities') return ok(String(message.id), { protocol: BRIDGE.protocolVersion, versions: [1, 2], actions: ['bridge.ping', 'stacks.list'] });
+      return ok(String(message.id));
+    });
+    const result = await probeBridge(api, UI_ID, true);
+    expect(result).toMatchObject({ ok: false, reason: 'unsupported', detail: expect.stringContaining('layout.apply') });
+  });
+
   it('rejects a bridge lacking the required actions', async () => {
     const { api } = fakeApi((message) => {
       if (message.action === 'bridge.capabilities') {
@@ -128,7 +154,7 @@ describe('probeBridge', () => {
       return ok(String(message.id));
     });
     const result = await probeBridge(api, UI_ID, true);
-    expect(result).toMatchObject({ ok: false, reason: 'unsupported', detail: expect.stringContaining('stacks.create') });
+    expect(result).toMatchObject({ ok: false, reason: 'unsupported', detail: expect.stringContaining('stacks.list') });
   });
 });
 
@@ -169,7 +195,10 @@ describe('createStack', () => {
   });
 
   it('surfaces bridge error codes as BridgeError', async () => {
-    const { api } = happyApi({ createError: { code: 'BUSY', message: 'Another mutation is in flight' } });
+    const { api } = fakeApi((message) => {
+      if (message.action === 'stacks.create') return errResp(String(message.id), 'BUSY', 'Another mutation is in flight');
+      return ok(String(message.id));
+    });
     const error = await createStack(api, UI_ID, [1, 2], 'n').catch((e: unknown) => e);
     expect(error).toBeInstanceOf(BridgeError);
     expect((error as BridgeError).code).toBe('BUSY');
@@ -177,7 +206,7 @@ describe('createStack', () => {
   });
 });
 
-describe('createBridgePort', () => {
+describe('applyLayout (via the port)', () => {
   function fakeTabs(initial: Array<{ id?: number; groupId?: number }> = []) {
     const store = initial.map((tab) => ({ ...tab }));
     const ungrouped: number[][] = [];
@@ -214,37 +243,38 @@ describe('createBridgePort', () => {
     await expect(port.listGroups(1)).resolves.toEqual([]);
   });
 
-  it('apply: clears leftover native groups, skips dead/small plans, creates the rest', async () => {
+  it('apply: one declarative layout.apply carries the whole plan; dead/small plans skipped client-side', async () => {
     const { api, calls } = happyApi();
     const { api: tabsApi, ungrouped } = fakeTabs([
       { id: 1, groupId: 9 },
       { id: 2 },
       { id: 3 },
-      { id: 4 }, // plan B references 3 and 4; plan C references only 5 (dead)
+      { id: 4 }, // plan B references 4 and 5; 5 is dead
     ]);
     const port = createBridgePort(api, UI_ID, () => false, tabsApi);
     const report = await port.apply(
       [
         { name: 'A', tabIds: [2, 3] },
-        { name: 'B', tabIds: [4, 5] },
+        { name: 'B', tabIds: [4, 5] }, // 5 dead → one live tab → skipped
         { name: 'C', tabIds: [5] },
       ],
       1,
     );
     expect(report).toMatchObject({ applied: 1, skipped: 2, failed: 0, backend: 'stacks' });
-    expect(ungrouped).toEqual([[1]]);
-    const creates = calls.filter((c) => c.message.action === 'stacks.create');
-    expect(creates).toHaveLength(1);
-    expect((creates[0]?.message.params as { tabIds: number[] }).tabIds).toEqual([2, 3]);
+    expect(ungrouped).toEqual([[1]]); // leftover native group cleared first
+    const applies = calls.filter((c) => c.message.action === 'layout.apply');
+    expect(applies).toHaveLength(1);
+    expect(applies[0]?.message.v).toBe(BRIDGE.protocolVersion);
+    expect((applies[0]?.message.params as { groups: unknown }).groups).toEqual([{ name: 'A', tabIds: [2, 3] }]);
   });
 
-  it('apply: a bridge failure fails the plan without rescuing it through another transport', async () => {
-    const { api } = happyApi({ createError: { code: 'BUSY', message: 'Another mutation is in flight' } });
+  it('apply: a bridge failure fails the whole transactional plan', async () => {
+    const { api } = happyApi({ layoutError: { code: 'BUSY', message: 'Another mutation is in flight' } });
     const { api: tabsApi } = fakeTabs([{ id: 1 }, { id: 2 }]);
     const port = createBridgePort(api, UI_ID, () => false, tabsApi);
     const report = await port.apply([{ name: 'A', tabIds: [1, 2] }], 1);
     expect(report).toMatchObject({ applied: 0, failed: 1 });
-    expect(report.failures[0]).toContain('Stack "A"');
+    expect(report.failures[0]).toContain('layout.apply failed');
     expect(report.failures[0]).toContain('BUSY');
   });
 
@@ -254,6 +284,26 @@ describe('createBridgePort', () => {
     const port = createBridgePort(api, UI_ID, () => false, tabsApi);
     const report = await port.apply([], 1);
     expect(report.applied).toBe(0);
+    expect(calls).toHaveLength(0);
+  });
+
+  it('apply: unchanged groups count as applied (idempotent re-send is a success, not a failure)', async () => {
+    const { api, calls } = happyApi();
+    // Override: every group comes back unchanged (already in the requested state).
+    const api2: BridgeApi = {
+      async sendMessage(extId, message) {
+        const m = message as Record<string, unknown>;
+        if (m.action === 'layout.apply') {
+          const groups = (m.params as { groups: Array<{ name: string }> }).groups;
+          return ok(String(m.id), { rev: 2, applied: groups.map((g) => ({ name: g.name, groupExtId: 'g', tabIds: [], unchanged: true })), dissolved: [], skipped: [] });
+        }
+        return happyApi().api.sendMessage(extId, message);
+      },
+    };
+    const { api: tabsApi } = fakeTabs([{ id: 1 }, { id: 2 }]);
+    const port = createBridgePort(api2, UI_ID, () => false, tabsApi);
+    const report = await port.apply([{ name: 'A', tabIds: [1, 2] }], 1);
+    expect(report).toMatchObject({ applied: 1, failed: 0 });
     expect(calls).toHaveLength(0);
   });
 
