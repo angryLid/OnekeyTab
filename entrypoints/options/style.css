@@ -7,10 +7,36 @@
   background-color: #242424;
 }
 
+body {
+  margin: 0;
+}
+
+/* Left sidebar holds the title and tab buttons; the content column keeps a constant width so switching tabs never resizes the page. */
+.layout {
+  display: flex;
+  min-height: 100vh;
+}
+
+.sidebar {
+  position: sticky;
+  top: 0;
+  flex: 0 0 220px;
+  box-sizing: border-box;
+  height: 100vh;
+  overflow-y: auto;
+  padding: 2rem 1.25rem;
+  border-right: 1px solid #5c5c5c;
+}
+
 main {
-  max-width: 640px;
-  margin: 0 auto;
+  flex: 1;
+  min-width: 0;
   padding: 2rem;
+}
+
+/* Settings prose keeps a readable measure; the Logs panel uses the full content width. */
+section[data-panel='settings'] {
+  max-width: 720px;
 }
 
 section {
@@ -18,7 +44,7 @@ section {
 }
 
 h1 {
-  font-size: 2em;
+  font-size: 1.4em;
 }
 
 h2 {
@@ -86,17 +112,19 @@ button:disabled {
   }
 }
 
-/* Tabs */
+/* Tabs — vertical list inside the sidebar */
 .tabs {
   display: flex;
-  gap: 0.5rem;
-  margin-bottom: 1.5rem;
-  border-bottom: 1px solid #5c5c5c;
-  padding-bottom: 0.5rem;
+  flex-direction: column;
+  gap: 0.25rem;
+  margin-top: 1.5rem;
 }
 
 .tab {
   margin-top: 0;
+  width: 100%;
+  padding: 0.45em 0.75em;
+  text-align: left;
   background: transparent;
   color: inherit;
   border: 1px solid transparent;
@@ -327,4 +355,33 @@ button.danger {
 .sel-dropped td:nth-child(2) {
   color: #f87171;
   white-space: nowrap;
+}
+
+/* Narrow windows: stack the sidebar above the content. */
+@media (max-width: 640px) {
+  .layout {
+    flex-direction: column;
+  }
+
+  .sidebar {
+    position: static;
+    flex: none;
+    width: auto;
+    height: auto;
+    border-right: none;
+    border-bottom: 1px solid #5c5c5c;
+  }
+
+  .tabs {
+    flex-direction: row;
+    margin-top: 1rem;
+  }
+
+  .tab {
+    width: auto;
+  }
+
+  main {
+    padding: 1.5rem;
+  }
 }
