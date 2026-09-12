@@ -33,6 +33,7 @@ export default defineBackground(() => {
 
     const startedAt = Date.now();
     const record: RunRecord = {
+      kind: 'run',
       id: newRunId(startedAt),
       ts: startedAt,
       outcome: 'success',
@@ -238,6 +239,7 @@ export default defineBackground(() => {
       return tabRec;
     });
     const dedupe: DedupeRecord = {
+      kind: 'dedupe',
       id: newRunId(),
       ts: Date.now(),
       windowId,
@@ -291,6 +293,7 @@ export default defineBackground(() => {
   ): Promise<string | undefined> {
     const selected = audit.tabs.filter((t) => t.selected);
     const selection: SelectionRecord = {
+      kind: 'selection',
       id: newRunId(),
       ts: Date.now(),
       windowId,

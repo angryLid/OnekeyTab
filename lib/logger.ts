@@ -1,5 +1,6 @@
 import { browser } from 'wxt/browser';
 import { LOG } from './constants';
+import { isDedupeRecord, isSelectionRecord } from './types';
 import type { AnyLogRecord, LogIndex, LogIndexEntry, LogKind } from './types';
 
 /** Any record kind the log can store. */
@@ -37,7 +38,7 @@ export function recordBytes(record: AnyLogRecord): number {
 }
 
 function entryFromRecord(record: AnyLogRecord): LogIndexEntry {
-  if ('selectedCount' in record) {
+  if (isSelectionRecord(record)) {
     return {
       id: record.id,
       kind: 'selection',
@@ -49,7 +50,7 @@ function entryFromRecord(record: AnyLogRecord): LogIndexEntry {
       bytes: recordBytes(record),
     };
   }
-  if ('plannedCloseCount' in record) {
+  if (isDedupeRecord(record)) {
     return {
       id: record.id,
       kind: 'dedupe',

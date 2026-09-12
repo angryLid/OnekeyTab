@@ -135,6 +135,7 @@ export interface AuditTab {
 
 /** Selection audit record: exactly which tabs were read and why each was kept or dropped. */
 export interface SelectionRecord {
+  kind: LogKind;
   id: string;
   ts: number;
   windowId: number;
@@ -165,6 +166,7 @@ export interface RunCall {
 }
 
 export interface RunRecord {
+  kind: LogKind;
   id: string;
   ts: number;
   outcome: RunOutcome;
@@ -220,6 +222,7 @@ export interface DedupeTabRecord {
 
 /** Dedupe record: which tabs the pre-pass compared, what it closed, and what actually died. */
 export interface DedupeRecord {
+  kind: LogKind;
   id: string;
   ts: number;
   windowId: number;
@@ -234,6 +237,26 @@ export interface DedupeRecord {
 
 /** Any record kind the log can store. */
 export type AnyLogRecord = RunRecord | SelectionRecord | DedupeRecord;
+
+/** Discriminate a record's kind; falls back to shape checks for records stored before the `kind` field existed. */
+export function recordKind(record: AnyLogRecord): LogKind {
+  if (record.kind) return record.kind;
+  if ('selectedCount' in record) return 'selection';
+  if ('plannedCloseCount' in record) return 'dedupe';
+  return 'run';
+}
+
+export function isRunRecord(record: AnyLogRecord): record is RunRecord {
+  return recordKind(record) === 'run';
+}
+
+export function isSelectionRecord(record: AnyLogRecord): record is SelectionRecord {
+  return recordKind(record) === 'selection';
+}
+
+export function isDedupeRecord(record: AnyLogRecord): record is DedupeRecord {
+  return recordKind(record) === 'dedupe';
+}
 
 /** Lightweight projection stored in the index; a full record is read on demand. */
 export interface LogIndexEntry {

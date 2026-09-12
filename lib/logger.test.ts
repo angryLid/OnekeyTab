@@ -5,6 +5,7 @@ import type { DedupeRecord, LogIndex, RunRecord, SelectionRecord } from './types
 
 function rec(overrides: Partial<RunRecord> = {}): RunRecord {
   return {
+    kind: 'run',
     id: newRunId(),
     ts: 0,
     outcome: 'success',
@@ -64,6 +65,7 @@ describe('appendToIndex', () => {
 
 function selRec(overrides: Partial<SelectionRecord> = {}): SelectionRecord {
   return {
+    kind: 'selection',
     id: newRunId(),
     ts: 0,
     windowId: 1,
@@ -142,6 +144,7 @@ it('LOG.maxTotalBytes is within the default storage.local quota', () => {
 
 function dedupeRec(overrides: Partial<DedupeRecord> = {}): DedupeRecord {
   return {
+    kind: 'dedupe',
     id: newRunId(),
     ts: 0,
     windowId: 1,

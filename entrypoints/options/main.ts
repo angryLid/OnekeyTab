@@ -8,6 +8,7 @@ import type { AnyLogRecord } from '@/lib/logger';
 import { bridgeApi, DEFAULT_UI_EXTENSION_ID, probeBridge } from '@/lib/stackbridge';
 import type { BridgeRuntime } from '@/lib/stackbridge';
 import { describeVivaldiSignals } from '@/lib/vivaldi';
+import { isDedupeRecord, isSelectionRecord, recordKind } from '@/lib/types';
 import type { AuditTab, DedupeRecord, ExclusionReason, GroupingBackend, LogIndexEntry, LogKind, RunRecord, SelectionRecord } from '@/lib/types';
 
 const input = document.querySelector<HTMLInputElement>('#api-key')!;
@@ -268,8 +269,8 @@ async function toggleDetail(detail: HTMLDivElement, entry: LogIndexEntry): Promi
     detail.textContent = 'Record no longer available.';
     return;
   }
-  if ('plannedCloseCount' in record) renderDedupeDetail(detail, record);
-  else if ('tabs' in record) renderSelectionDetail(detail, record);
+  if (isDedupeRecord(record)) renderDedupeDetail(detail, record);
+  else if (isSelectionRecord(record)) renderSelectionDetail(detail, record);
   else renderDetail(detail, record);
 }
 
@@ -329,20 +330,15 @@ function addLinkedRecordButton(
     void (async () => {
       const linked = await getRecord(recordId);
       container.hidden = false;
-      const matches =
-        linked != null &&
-        (expected === 'selection'
-          ? 'selectedCount' in linked
-          : expected === 'dedupe'
-            ? 'plannedCloseCount' in linked
-            : !('selectedCount' in linked) && !('plannedCloseCount' in linked));
+      const matches = linked != null && recordKind(linked) === expected;
       if (!matches) {
-        container.textContent = `${expected === 'selection' ? 'Selection' : expected === 'dedupe' ? 'Dedupe' : 'Run'} record no longer available.`;
+        const label = expected === 'run' ? 'Run' : expected === 'selection' ? 'Selection' : 'Dedupe';
+        container.textContent = `${label} record no longer available.`;
         return;
       }
-      if (expected === 'selection') renderSelectionDetail(container, linked as SelectionRecord);
-      else if (expected === 'dedupe') renderDedupeDetail(container, linked as DedupeRecord);
-      else renderDetail(container, linked as RunRecord);
+      if (isSelectionRecord(linked)) renderSelectionDetail(container, linked);
+      else if (isDedupeRecord(linked)) renderDedupeDetail(container, linked);
+      else renderDetail(container, linked);
     })();
   });
   detail.appendChild(btn);
