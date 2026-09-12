@@ -126,7 +126,7 @@ describe('planDedupe', () => {
       ],
       THRESHOLD,
     );
-    expect(plan.entries[0]?.tabId).toBe(3);
+    expect(plan.entries[0]?.id).toBe(3);
     expect(plan.entries[0]?.role).toBe('baseline');
   });
 
@@ -181,7 +181,7 @@ describe('planDedupe', () => {
       THRESHOLD,
     );
     // Tab 3 is closed by baseline 1; baseline 2 must not claim or re-close it.
-    const closed3 = plan.entries.find((e) => e.tabId === 3);
+    const closed3 = plan.entries.find((e) => e.id === 3);
     expect(closed3).toMatchObject({ role: 'closed', baselineId: 1 });
     expect(plan.closedIds).toEqual([3]);
   });

@@ -188,19 +188,9 @@ export default defineBackground(() => {
     const plan = planDedupe(eligible, threshold);
     const tabById = new Map(eligible.map((t) => [t.id as number, t]));
     const entries: DedupeTabRecord[] = plan.entries.map((entry) => {
-      const tab = tabById.get(entry.tabId)!;
-      const tabRec: DedupeTabRecord = {
-        id: entry.tabId,
-        url: tab.url ?? '',
-        title: (tab.title ?? '').slice(0, LIMITS.titleMax),
-        lastAccessed: tab.lastAccessed ?? 0,
-        role: entry.role,
-      };
-      if (entry.score != null) {
-        tabRec.score = entry.score;
-        tabRec.baselineId = entry.baselineId;
-      }
-      return tabRec;
+      const tab = tabById.get(entry.id)!;
+      // DedupeEntry fields align with DedupeTabRecord, so the audit payload is a spread plus the tab facts.
+      return { ...entry, url: tab.url ?? '', title: (tab.title ?? '').slice(0, LIMITS.titleMax), lastAccessed: tab.lastAccessed ?? 0 };
     });
     const dedupe: DedupeRecord = {
       kind: 'dedupe',

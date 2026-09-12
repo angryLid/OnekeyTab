@@ -1,5 +1,6 @@
 import type { Browser } from 'wxt/browser';
 import { DEDUPE } from './constants';
+import type { DedupeTabRole } from './types';
 
 /** A URL reduced to its comparable identity: host, path segments (fragment folded in), normalized query params. */
 export interface NormalizedUrl {
@@ -76,11 +77,9 @@ export function pairScore(a: NormalizedUrl, b: NormalizedUrl): number {
   return DEDUPE.weightPath * pathSimilarity(a.segments, b.segments) + DEDUPE.weightQuery * querySimilarity(a.params, b.params);
 }
 
-export type DedupeRole = 'baseline' | 'closed' | 'ignored';
-
 export interface DedupeEntry {
-  tabId: number;
-  role: DedupeRole;
+  id: number;
+  role: DedupeTabRole;
   /** Similarity to the baseline it was compared against; present for closed tabs. */
   score?: number;
   /** Tab id of the baseline; present for closed tabs. */
@@ -117,17 +116,17 @@ export function planDedupe(eligible: Browser.tabs.Tab[], threshold: number): Ded
     const norm = norms[i];
     if (closed.has(tabId)) continue;
     if (!norm) {
-      entries.push({ tabId, role: 'ignored' });
+      entries.push({ id: tabId, role: 'ignored' });
       continue;
     }
-    entries.push({ tabId, role: 'baseline' });
+    entries.push({ id: tabId, role: 'baseline' });
     for (let j = i + 1; j < sorted.length; j++) {
       const otherId = sorted[j]!.id as number;
       const otherNorm = norms[j];
       if (closed.has(otherId) || !otherNorm) continue;
       const score = pairScore(norm, otherNorm);
       if (score >= threshold) {
-        entries.push({ tabId: otherId, role: 'closed', score: Math.round(score * 1000) / 1000, baselineId: tabId });
+        entries.push({ id: otherId, role: 'closed', score: Math.round(score * 1000) / 1000, baselineId: tabId });
         closedIds.push(otherId);
         closed.add(otherId);
       }
