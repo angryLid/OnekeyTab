@@ -9,7 +9,7 @@ import { bridgeApi, DEFAULT_UI_EXTENSION_ID, probeBridge } from '@/lib/stackbrid
 import type { BridgeRuntime } from '@/lib/stackbridge';
 import { describeVivaldiSignals } from '@/lib/vivaldi';
 import { isDedupeRecord, isSelectionRecord, recordKind } from '@/lib/types';
-import type { AuditTab, DedupeRecord, ExclusionReason, GroupingBackend, LogIndexEntry, LogKind, RunRecord, SelectionRecord } from '@/lib/types';
+import type { AnyLogRecord, AuditTab, DedupeRecord, ExclusionReason, GroupingBackend, LogIndexEntry, LogKind, RunRecord, SelectionRecord } from '@/lib/types';
 
 const input = document.querySelector<HTMLInputElement>('#api-key')!;
 const saveButton = document.querySelector<HTMLButtonElement>('#save')!;
@@ -345,6 +345,31 @@ function addLinkedRecordButton(
   detail.appendChild(container);
 }
 
+/** One audit-table row: status glyph, kept/dropped styling, and pre-escaped cell HTML. */
+interface AuditTableRow {
+  status: string;
+  kept: boolean;
+  cells: string[];
+}
+
+/** Shared audit-table skeleton: status column, escaped cells, and the export button wiring. */
+function renderAuditTable(detail: HTMLDivElement, headers: string[], rows: AuditTableRow[], record: AnyLogRecord): void {
+  const parts: string[] = [];
+  parts.push(`<table class="sel-table"><thead><tr>${headers.map((h) => `<th>${h}</th>`).join('')}</tr></thead><tbody>`);
+  for (const row of rows) {
+    parts.push(
+      `<tr class="${row.kept ? 'sel-kept' : 'sel-dropped'}">` +
+        `<td class="sel-status">${row.status}</td>` +
+        row.cells.map((cell) => `<td>${cell}</td>`).join('') +
+        `</tr>`,
+    );
+  }
+  parts.push('</tbody></table>');
+  parts.push(`<button type="button" class="row-export">Export this audit</button>`);
+  detail.innerHTML = parts.join('');
+  detail.querySelector<HTMLButtonElement>('.row-export')!.addEventListener('click', () => void exportRecords([record]));
+}
+
 const ROLE_LABELS: Record<DedupeRecord['tabs'][number]['role'], string> = {
   baseline: 'survivor (newest of its family)',
   closed: 'closed',
@@ -357,26 +382,17 @@ function renderDedupeDetail(detail: HTMLDivElement, record: DedupeRecord): void 
   parts.push(
     `<p class="muted">window ${record.windowId} · threshold ${p.threshold} · weights ${p.weightPath}/${p.weightQuery} · substitute cost ${p.substituteCost}${p.ignoreGrouped ? ' · grouped tabs in scope (Vivaldi)' : ''} · planned ${record.plannedCloseCount} · closed ${record.closedCount ?? '…'}</p>`,
   );
-  parts.push(
-    `<table class="sel-table"><thead><tr><th></th><th>role</th><th>score</th><th>title</th><th>url</th></tr></thead><tbody>`,
-  );
-  for (const tab of record.tabs) {
-    const status = tab.role === 'closed' ? '✗' : tab.role === 'baseline' ? '✓' : '–';
-    const outcome = tab.outcome ? ` · ${tab.outcome}` : '';
-    parts.push(
-      `<tr class="${tab.role === 'closed' ? 'sel-dropped' : 'sel-kept'}">` +
-        `<td class="sel-status">${status}</td>` +
-        `<td>${escapeHtml(ROLE_LABELS[tab.role])}${outcome}</td>` +
-        `<td>${tab.score != null ? tab.score.toFixed(2) : ''}</td>` +
-        `<td>${escapeHtml(tab.title || '(untitled)')}</td>` +
-        `<td>${tab.url ? escapeHtml(tab.url) : '<span class="muted">—</span>'}</td>` +
-        `</tr>`,
-    );
-  }
-  parts.push('</tbody></table>');
-  parts.push(`<button type="button" class="row-export">Export this audit</button>`);
-  detail.innerHTML = parts.join('');
-  detail.querySelector<HTMLButtonElement>('.row-export')!.addEventListener('click', () => void exportRecords([record]));
+  const rows = record.tabs.map((tab) => ({
+    status: tab.role === 'closed' ? '✗' : tab.role === 'baseline' ? '✓' : '–',
+    kept: tab.role !== 'closed',
+    cells: [
+      `${escapeHtml(ROLE_LABELS[tab.role])}${tab.outcome ? ` · ${tab.outcome}` : ''}`,
+      tab.score != null ? tab.score.toFixed(2) : '',
+      escapeHtml(tab.title || '(untitled)'),
+      tab.url ? escapeHtml(tab.url) : '<span class="muted">—</span>',
+    ],
+  }));
+  renderAuditTable(detail, ['', 'role', 'score', 'title', 'url'], rows, record);
   if (record.runId) addLinkedRecordButton(detail, 'Show the run record for this dedupe pass', record.runId, 'run');
 }
 
@@ -403,23 +419,12 @@ function renderSelectionDetail(detail: HTMLDivElement, record: SelectionRecord):
   parts.push(
     `<p class="muted">window ${record.windowId} · read ${record.totalTabs} · kept ${record.selectedCount} · excluded ${record.excludedCount}</p>`,
   );
-  parts.push(
-    `<table class="sel-table"><thead><tr><th></th><th>exclusion reason</th><th>title</th><th>url</th></tr></thead><tbody>`,
-  );
-  for (const tab of record.tabs) {
-    parts.push(
-      `<tr class="${tab.selected ? 'sel-kept' : 'sel-dropped'}">` +
-        `<td class="sel-status">${tab.selected ? '✓' : '✗'}</td>` +
-        `<td>${escapeHtml(reasonLabel(tab))}</td>` +
-        `<td>${escapeHtml(tab.title || '(untitled)')}</td>` +
-        `<td>${tab.url ? escapeHtml(tab.url) : '<span class="muted">—</span>'}</td>` +
-        `</tr>`,
-    );
-  }
-  parts.push('</tbody></table>');
-  parts.push(`<button type="button" class="row-export">Export this audit</button>`);
-  detail.innerHTML = parts.join('');
-  detail.querySelector<HTMLButtonElement>('.row-export')!.addEventListener('click', () => void exportRecords([record]));
+  const rows = record.tabs.map((tab) => ({
+    status: tab.selected ? '✓' : '✗',
+    kept: tab.selected,
+    cells: [escapeHtml(reasonLabel(tab)), escapeHtml(tab.title || '(untitled)'), tab.url ? escapeHtml(tab.url) : '<span class="muted">—</span>'],
+  }));
+  renderAuditTable(detail, ['', 'exclusion reason', 'title', 'url'], rows, record);
 }
 
 async function refreshCount(): Promise<void> {
