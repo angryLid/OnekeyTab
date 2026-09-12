@@ -1,5 +1,7 @@
 // This module is deliberately wxt-free: the browser API objects are injected at the composition
 // point (entrypoints/background.ts), so tests run without any browser environment.
+import { BRIDGE } from './constants';
+import { isUngroupedGroupId } from './types';
 import type {
   ApplyReport,
   EffectiveBackend,
@@ -61,10 +63,6 @@ export interface NativeTabGroupsApi {
   update(groupId: number, properties: { title?: string }): Promise<unknown>;
 }
 
-function isUngrouped(tab: { groupId?: number }): boolean {
-  return tab.groupId == null || tab.groupId <= 0;
-}
-
 /** Factory requires the API objects: background passes browser.tabs / browser.tabGroups with a cast. */
 export function nativePort(tabs: NativeTabsApi, tabGroups: NativeTabGroupsApi): GroupingPort {
   return {
@@ -106,7 +104,7 @@ export function nativePort(tabs: NativeTabsApi, tabGroups: NativeTabGroupsApi): 
           // Candidates are ungrouped by selection; the liveness re-check is the last word.
           const tabIds = plan.tabIds.filter((id) => {
             const tab = live.get(id);
-            return tab != null && isUngrouped(tab);
+            return tab != null && isUngroupedGroupId(tab.groupId);
           });
           if (tabIds.length < 2) {
             report.skipped++;

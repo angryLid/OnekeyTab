@@ -1,6 +1,7 @@
 // Wxt-free by design: the runtime and tab API objects are injected at the composition point
 // (entrypoints/background.ts), so this module — and the whole protocol — tests without a browser.
 import { BRIDGE } from './constants';
+import { isUngroupedGroupId } from './types';
 import type { GroupingPort } from './grouping-port';
 import type { ApplyReport, GroupInfo, GroupPlan, PortCaps, PortProbeResult } from './types';
 
@@ -238,7 +239,7 @@ export function createBridgePort(
       for (const tab of tabsInWindow) {
         if (tab.id == null) continue;
         live.add(tab.id);
-        if ((tab.groupId ?? -1) > 0) nativeGrouped.push(tab.id);
+        if (!isUngroupedGroupId(tab.groupId)) nativeGrouped.push(tab.id);
       }
       // Clear leftover invisible Chromium groups first: a visible stack on top of an invisible
       // group is an untested mixed state (H14 covers what the bridge itself would do here).

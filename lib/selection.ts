@@ -1,5 +1,6 @@
 import type { Browser } from 'wxt/browser';
 import { LIMITS } from './constants';
+import { isUngroupedGroupId } from './types';
 import { sanitizeUrl } from './model-input';
 import type { GroupInfo, PortCaps } from './types';
 import type { AuditTab, ExclusionReason } from './types';
@@ -9,10 +10,6 @@ const INTERNAL_SCHEMES = ['about:', 'chrome:', 'edge:', 'chrome-extension:', 'mo
 function isInternalUrl(url: string): boolean {
   const lower = url.toLowerCase();
   return INTERNAL_SCHEMES.some((scheme) => lower.startsWith(scheme));
-}
-
-function isUngrouped(tab: Browser.tabs.Tab): boolean {
-  return tab.groupId == null || tab.groupId <= 0;
 }
 
 /**
@@ -44,7 +41,7 @@ export function selectionContextFromGroups(
 export function defaultSelectionContext(tabs: readonly Browser.tabs.Tab[]): SelectionContext {
   const stacks = new Map<number, string>();
   for (const tab of tabs) {
-    if (tab.id != null && !isUngrouped(tab)) stacks.set(tab.id, String(tab.groupId));
+    if (tab.id != null && !isUngroupedGroupId(tab.groupId)) stacks.set(tab.id, String(tab.groupId));
   }
   return { stacks, visibleGroupReason: 'grouped', nativeGroupsTrustworthy: true };
 }
@@ -56,7 +53,7 @@ export function exclusionReason(tab: Browser.tabs.Tab, ctx: SelectionContext): E
   // Visible-group membership first: under a bridge context a leftover invisible groupId must
   // never downgrade a visible stack member into the (droppable) grouped case.
   if (ctx.stacks.get(tab.id) != null) return ctx.visibleGroupReason;
-  if (ctx.nativeGroupsTrustworthy && !isUngrouped(tab)) return 'grouped';
+  if (ctx.nativeGroupsTrustworthy && !isUngroupedGroupId(tab.groupId)) return 'grouped';
   if (typeof tab.url !== 'string' || tab.url.length === 0) return 'no-url';
   if (isInternalUrl(tab.url)) return 'internal-url';
   return null;

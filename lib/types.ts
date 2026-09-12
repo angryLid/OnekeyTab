@@ -70,6 +70,11 @@ export interface ApplyReport {
 
 export type GroupingBackend = 'auto' | 'native' | 'stacks';
 
+/** True when a Chromium groupId does not denote a real group (absent, 0, or a negative sentinel). */
+export function isUngroupedGroupId(groupId: number | null | undefined): boolean {
+  return groupId == null || groupId <= 0;
+}
+
 /** Backend actually used for a run; 'auto' resolves to one of these before anything is written. */
 export type EffectiveBackend = 'native' | 'stacks';
 
