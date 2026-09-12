@@ -1,7 +1,7 @@
 import './style.css';
 import { browser } from 'wxt/browser';
 import { getLastError, getConfig, updateConfig } from '@/lib/config';
-import { BRIDGE, DEDUPE, LOG } from '@/lib/constants';
+import { BRIDGE, DEDUPE, LOG, MODEL_ID_MAX, PROVIDERS, isValidModelId, resolveModel } from '@/lib/constants';
 import { verifyApiKey } from '@/lib/llm';
 import { clearLog, countRecords, getRecord, listRecent } from '@/lib/logger';
 import { bridgeApi, DEFAULT_UI_EXTENSION_ID, probeBridge } from '@/lib/stackbridge';
@@ -13,6 +13,10 @@ import type { AnyLogRecord, AuditTab, DedupeRecord, ExclusionReason, GroupingBac
 const input = document.querySelector<HTMLInputElement>('#api-key')!;
 const saveButton = document.querySelector<HTMLButtonElement>('#save')!;
 const status = document.querySelector<HTMLParagraphElement>('#status')!;
+const modelInput = document.querySelector<HTMLInputElement>('#model-id')!;
+const saveModelButton = document.querySelector<HTMLButtonElement>('#save-model')!;
+const resetModelButton = document.querySelector<HTMLButtonElement>('#reset-model')!;
+const modelStatus = document.querySelector<HTMLParagraphElement>('#model-status')!;
 const dedupeEnabled = document.querySelector<HTMLInputElement>('#dedupe-enabled')!;
 const dedupeThreshold = document.querySelector<HTMLInputElement>('#dedupe-threshold')!;
 const dedupeThresholdValue = document.querySelector<HTMLSpanElement>('#dedupe-threshold-value')!;
@@ -73,6 +77,9 @@ async function refreshBridgeStatus(): Promise<void> {
 async function initSettings(): Promise<void> {
   const config = await getConfig();
   if (config?.apiKey) input.value = config.apiKey;
+  modelInput.value = config?.model ?? '';
+  modelInput.placeholder = PROVIDERS.openrouter.model;
+  modelInput.maxLength = MODEL_ID_MAX;
   const dedupe = config?.dedupe ?? { enabled: true, threshold: DEDUPE.threshold };
   dedupeEnabled.checked = dedupe.enabled;
   dedupeThreshold.value = String(dedupe.threshold);
@@ -147,6 +154,59 @@ saveButton.addEventListener('click', async () => {
     setStatus(`Verification failed: ${(e as Error).message}`, 'error');
   } finally {
     saveButton.disabled = false;
+  }
+});
+
+function setModelStatus(message: string, kind: 'ok' | 'error' | 'muted'): void {
+  modelStatus.textContent = message;
+  modelStatus.className = kind;
+}
+
+saveModelButton.addEventListener('click', async () => {
+  const model = modelInput.value.trim();
+  if (model && !isValidModelId(model)) {
+    setModelStatus(`Invalid model id: no whitespace allowed, at most ${MODEL_ID_MAX} characters.`, 'error');
+    return;
+  }
+  const config = await getConfig();
+  if (!config?.apiKey) {
+    setModelStatus('Save an API key first — the model is verified against it.', 'error');
+    return;
+  }
+  saveModelButton.disabled = true;
+  // Empty input means "use the built-in default": store '' (not undefined) so the reset is explicit.
+  setModelStatus('Verifying…', 'muted');
+  try {
+    await verifyApiKey(config.apiKey, model || undefined);
+    await updateConfig({ model });
+    setModelStatus(
+      model
+        ? `Model verified — saved. Grouping now uses ${model}.`
+        : `Saved. Grouping uses the built-in default (${PROVIDERS.openrouter.model}).`,
+      'ok',
+    );
+  } catch (e) {
+    setModelStatus(`Verification failed: ${(e as Error).message}`, 'error');
+  } finally {
+    saveModelButton.disabled = false;
+  }
+});
+
+resetModelButton.addEventListener('click', async () => {
+  modelInput.value = '';
+  const config = await getConfig();
+  if (config?.apiKey) {
+    resetModelButton.disabled = true;
+    try {
+      await updateConfig({ model: '' });
+      setModelStatus(`Restored the built-in default (${resolveModel(config.model)}).`, 'ok');
+    } catch (e) {
+      setModelStatus(`Reset failed: ${(e as Error).message}`, 'error');
+    } finally {
+      resetModelButton.disabled = false;
+    }
+  } else {
+    setModelStatus(`Restored the built-in default (${resolveModel(config?.model)}).`, 'ok');
   }
 });
 

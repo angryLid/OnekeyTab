@@ -1,10 +1,12 @@
-import { LIMITS, PROVIDERS } from './constants';
+import { LIMITS, PROVIDERS, isValidModelId, resolveModel } from './constants';
 import type { ChatMessage, ChatResult } from './types';
 
 export interface CompletionOptions {
   messages: ChatMessage[];
   maxTokens?: number;
   timeoutMs?: number;
+  /** Model id override; absent/empty falls back to the built-in provider default. */
+  model?: string;
 }
 
 /**
@@ -24,8 +26,10 @@ export function resetReasoningParamSupport(): void {
 
 function buildBody(opts: CompletionOptions, includeReasoning: boolean): Record<string, unknown> {
   const provider = PROVIDERS.openrouter;
+  // resolveModel also guards against a whitespace/oversized id slipping into a request.
+  const model = isValidModelId(resolveModel(opts.model)) ? resolveModel(opts.model) : provider.model;
   const body: Record<string, unknown> = {
-    model: provider.model,
+    model,
     messages: opts.messages,
     temperature: LIMITS.temperature,
     max_tokens: opts.maxTokens ?? LIMITS.maxTokens,
@@ -90,9 +94,10 @@ export async function chatCompletion(apiKey: string, opts: CompletionOptions): P
   return { content: message.content, model: (data.model as string | undefined) ?? 'unknown' };
 }
 
-export async function verifyApiKey(apiKey: string): Promise<void> {
+export async function verifyApiKey(apiKey: string, model?: string): Promise<void> {
   await postChat(apiKey, {
     messages: [{ role: 'user', content: 'ping' }],
     maxTokens: 1,
+    model,
   });
 }

@@ -31,6 +31,20 @@ export const LIMITS = {
   skipBadgeMs: 2000,
 } as const;
 
+/** Longest accepted custom model id; OpenRouter ids fit comfortably under this. */
+export const MODEL_ID_MAX = 120;
+
+/** The effective model id: a non-empty configured override, or the built-in provider default. */
+export function resolveModel(configured?: string): string {
+  const trimmed = configured?.trim();
+  return trimmed ? trimmed : PROVIDERS.openrouter.model;
+}
+
+/** True when the string is shaped like a model id (no whitespace, within the length cap). */
+export function isValidModelId(value: string): boolean {
+  return value.length > 0 && value.length <= MODEL_ID_MAX && !/\s/.test(value);
+}
+
 /**
  * Dedupe scoring constants. Structural tuning knobs, deliberately not user-facing:
  * only the toggle and the threshold are exposed in the settings UI.

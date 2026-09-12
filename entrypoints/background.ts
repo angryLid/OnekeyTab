@@ -134,7 +134,7 @@ export default defineBackground(() => {
 
       const calls: RunCall[] = [];
       const firstStartedAt = Date.now();
-      const first = await chatCompletion(config.apiKey, { messages });
+      const first = await chatCompletion(config.apiKey, { messages, model: config.model });
       calls.push({
         ts: firstStartedAt,
         durationMs: Date.now() - firstStartedAt,
@@ -155,6 +155,7 @@ export default defineBackground(() => {
         const retryStartedAt = Date.now();
         const retry = await chatCompletion(config.apiKey, {
           messages: buildRetryMessages(messages, first.content, errors),
+          model: config.model,
         });
         calls.push({
           ts: retryStartedAt,

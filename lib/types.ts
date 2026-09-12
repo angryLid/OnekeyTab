@@ -3,6 +3,8 @@ export type ProviderId = 'openrouter';
 export interface Config {
   provider: ProviderId;
   apiKey: string;
+  /** Provider model id override; absent/empty = the built-in default in PROVIDERS. */
+  model?: string;
   /** Pre-group dedupe settings; absent in configs stored before the feature existed. */
   dedupe?: DedupeConfig;
   /** Grouping write backend; configs stored before the feature read as 'auto'. */
