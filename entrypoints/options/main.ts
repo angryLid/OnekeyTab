@@ -425,9 +425,12 @@ function renderSelectionDetail(detail: HTMLDivElement, record: SelectionRecord):
   renderAuditTable(detail, ['', 'exclusion reason', 'title', 'url'], rows, record);
 }
 
-async function refreshCount(): Promise<void> {
+/** Render the list and sync the count + "Load earlier" visibility from one countRecords call. */
+async function renderLogsView(): Promise<void> {
+  renderList();
   const total = await countRecords();
   logCount.textContent = `${total} record${total === 1 ? '' : 's'} recorded`;
+  loadMore.hidden = entries.length >= total;
 }
 
 async function refreshLogs(): Promise<void> {
@@ -435,9 +438,7 @@ async function refreshLogs(): Promise<void> {
     entries = await listRecent(LOG.listWindow); // newest-first, up to 100
     logsRenderedOnce = true;
   }
-  renderList();
-  await refreshCount();
-  loadMore.hidden = entries.length >= (await countRecords());
+  await renderLogsView();
 }
 
 for (const [name, selector] of FILTER_BUTTONS) {
@@ -452,9 +453,7 @@ for (const [name, selector] of FILTER_BUTTONS) {
 
 loadMore.addEventListener('click', async () => {
   entries = await listRecent(entries.length + LOG.listWindow);
-  renderList();
-  await refreshCount();
-  loadMore.hidden = entries.length >= (await countRecords());
+  await renderLogsView();
 });
 
 function download(filename: string, text: string): void {
