@@ -161,9 +161,16 @@ saveButton.addEventListener('click', async () => {
   }
 });
 
-// ---- Tabs ----
+// ---- Tabs (hash routing: #logs opens the logs tab, tab clicks sync the hash) ----
 
-function activateTab(name: 'settings' | 'logs'): void {
+const TAB_NAMES = ['settings', 'logs'] as const;
+type TabName = (typeof TAB_NAMES)[number];
+
+function currentHashTab(): TabName {
+  return location.hash === '#logs' ? 'logs' : 'settings';
+}
+
+function activateTab(name: TabName): void {
   const settingsTab = document.querySelector<HTMLButtonElement>('#tab-settings')!;
   const logsTab = document.querySelector<HTMLButtonElement>('#tab-logs')!;
   const isLogs = name === 'logs';
@@ -499,8 +506,19 @@ document.querySelector<HTMLButtonElement>('#clear-log')!.addEventListener('click
 
 // ---- Boot ----
 
+// Apply the tab from the URL, then keep it in sync with navigation.
+const applyTabFromHash = (): void => activateTab(currentHashTab());
+applyTabFromHash();
+window.addEventListener('hashchange', applyTabFromHash);
+
+document.querySelector<HTMLButtonElement>('#tab-settings')!.addEventListener('click', () => {
+  if (currentHashTab() === 'settings') activateTab('settings');
+  else location.hash = '#settings';
+});
+document.querySelector<HTMLButtonElement>('#tab-logs')!.addEventListener('click', () => {
+  if (currentHashTab() === 'logs') activateTab('logs');
+  else location.hash = '#logs';
+});
+
 void initSettings();
 void refreshBridgeStatus();
-
-document.querySelector<HTMLButtonElement>('#tab-settings')!.addEventListener('click', () => activateTab('settings'));
-document.querySelector<HTMLButtonElement>('#tab-logs')!.addEventListener('click', () => activateTab('logs'));
