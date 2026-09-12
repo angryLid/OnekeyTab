@@ -157,16 +157,20 @@ export async function selectPort(env: PortEnv, setting: GroupingBackend, ports: 
   return { kind: 'ready', port: ports.bridge, backend: 'stacks', probe: record };
 }
 
+/**
+ * One human sentence for a failed probe — the single source shared by the run-block error
+ * (selectPort) and the options status line. Callers add their own framing (install link, next step).
+ */
+export function describeProbeReason(probe: PortProbeResult): string {
+  if (probe.reason === 'no-listener') return 'StackBridge mod not detected (or blocked by Vivaldi)';
+  if (probe.reason === 'timeout') return `StackBridge mod did not respond${probe.detail ? `: ${probe.detail}` : ''}`;
+  if (probe.reason === 'not-paired') return 'StackBridge mod rejected this extension (NOT_PAIRED); pair it in the window.html console: StackBridge.pair(<this extension id>)';
+  return `StackBridge mod unusable (${probe.reason ?? 'unknown'}${probe.detail ? `: ${probe.detail}` : ''})`;
+}
+
 function blockReason(probe: PortProbeResult): string {
   if (probe.reason === 'no-listener') {
-    return 'StackBridge mod not detected (or blocked by Vivaldi). Grouping on Vivaldi requires it — install guide: ' +
-      'https://github.com/angryLid/Awesome-Vivaldi/tree/main/Bridge';
+    return `${describeProbeReason(probe)}. Grouping on Vivaldi requires it — install guide: ${BRIDGE.installDocsUrl}`;
   }
-  if (probe.reason === 'timeout') {
-    return `StackBridge mod did not respond${probe.detail ? `: ${probe.detail}` : ''}.`;
-  }
-  if (probe.reason === 'not-paired') {
-    return 'StackBridge mod rejected this extension (NOT_PAIRED). Pair it in the window.html console: StackBridge.pair(<this extension id>).';
-  }
-  return `StackBridge mod unusable (${probe.reason ?? 'unknown'}${probe.detail ? `: ${probe.detail}` : ''}).`;
+  return `${describeProbeReason(probe)}.`;
 }

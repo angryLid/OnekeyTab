@@ -4,6 +4,7 @@ import { getLastError, getConfig, updateConfig } from '@/lib/config';
 import { BRIDGE, DEDUPE, LOG, MODEL_ID_MAX, PROVIDERS, isValidModelId, resolveModel } from '@/lib/constants';
 import { verifyApiKey } from '@/lib/llm';
 import { clearLog, countRecords, getRecord, listRecent } from '@/lib/logger';
+import { describeProbeReason } from '@/lib/grouping-port';
 import { bridgeApi, DEFAULT_UI_EXTENSION_ID, probeBridge } from '@/lib/stackbridge';
 import type { BridgeRuntime } from '@/lib/stackbridge';
 import { describeVivaldiSignals } from '@/lib/vivaldi';
@@ -59,15 +60,11 @@ async function refreshBridgeStatus(): Promise<void> {
     const probe = await probeBridge(bridgeApi(browser.runtime as unknown as BridgeRuntime), extId);
     if (probe.ok) {
       statusLine.textContent = 'StackBridge: detected. Grouping on Vivaldi creates real Tab Stacks.';
-    } else if (probe.reason === 'no-listener') {
-      statusLine.textContent =
-        `StackBridge: not detected. Grouping on Vivaldi requires the mod (clicks will not run until it is installed) — install guide: ${BRIDGE.installDocsUrl}`;
-    } else if (probe.reason === 'timeout') {
-      statusLine.textContent = `StackBridge: installed but not responding. Restart Vivaldi or reinstall the mod (${BRIDGE.installDocsUrl}).`;
     } else if (probe.reason === 'not-paired') {
-      statusLine.textContent = 'StackBridge: paired mode rejected this extension. Pair it in the window.html console: StackBridge.pair(<extension id>).';
+      // Pairing, not installing, is the fix here — so no install-guide link.
+      statusLine.textContent = `StackBridge: ${describeProbeReason(probe)}.`;
     } else {
-      statusLine.textContent = `StackBridge: unusable (${probe.reason ?? 'unknown'}${probe.detail ? `: ${probe.detail}` : ''}). See ${BRIDGE.installDocsUrl}`;
+      statusLine.textContent = `StackBridge: ${describeProbeReason(probe)}. Clicks will not run until it works — install guide: ${BRIDGE.installDocsUrl}`;
     }
   } catch (e) {
     statusLine.textContent = `StackBridge status unknown: ${(e as Error).message}`;
