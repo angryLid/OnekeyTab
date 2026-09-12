@@ -168,14 +168,12 @@ function activateTab(name: TabName): void {
   logsTab.classList.toggle('is-active', isLogs);
   settingsTab.setAttribute('aria-selected', String(!isLogs));
   logsTab.setAttribute('aria-selected', String(isLogs));
-  document.querySelector<HTMLElement>('#panel-settings')!.hidden = isLogs;
-  document.querySelector<HTMLElement>('#panel-settings-privacy')!.hidden = isLogs;
-  document.querySelector<HTMLElement>('#panel-settings-security')!.hidden = isLogs;
-  document.querySelector<HTMLElement>('#panel-settings-dedupe')!.hidden = isLogs;
-  document.querySelector<HTMLElement>('#panel-settings-stacks')!.hidden = isLogs;
-  // The error section keeps its own visibility; only force-hidden while on Logs.
-  document.querySelector<HTMLElement>('#panel-settings-error')!.hidden = isLogs ? true : errorSection.hidden;
-  document.querySelector<HTMLElement>('#panel-logs')!.hidden = !isLogs;
+  for (const panel of document.querySelectorAll<HTMLElement>('[data-panel]')) {
+    // The error section keeps its own visibility; it is only force-hidden while on Logs.
+    if (panel === errorSection) continue;
+    panel.hidden = (panel.dataset.panel === 'logs') !== isLogs;
+  }
+  errorSection.hidden = isLogs || errorSection.hidden;
   if (isLogs) void refreshLogs();
 }
 

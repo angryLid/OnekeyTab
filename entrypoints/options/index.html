@@ -17,7 +17,7 @@
         <button id="tab-logs" class="tab" type="button" role="tab" aria-selected="false">Logs</button>
       </nav>
 
-      <section id="panel-settings" role="tabpanel">
+      <section id="panel-settings" role="tabpanel" data-panel="settings">
         <h2>OpenRouter API Key</h2>
         <p>
           Get a key at
@@ -29,7 +29,7 @@
         <p id="status" role="status"></p>
       </section>
 
-      <section id="panel-settings-stacks">
+      <section id="panel-settings-stacks" data-panel="settings">
         <h2>Vivaldi grouping (StackBridge)</h2>
         <p class="muted">
           On Vivaldi, grouping creates real Tab Stacks through the StackBridge mod
@@ -48,7 +48,7 @@
         <p id="backend-status" role="status"></p>
       </section>
 
-      <section id="panel-settings-dedupe">
+      <section id="panel-settings-dedupe" data-panel="settings">
         <h2>Pre-group dedupe</h2>
         <p class="muted">
           Before grouping, tabs in the current window are compared by URL similarity. Tabs whose
@@ -75,13 +75,13 @@
         <p id="dedupe-status" role="status"></p>
       </section>
 
-      <section id="panel-settings-error" hidden>
+      <section id="panel-settings-error" data-panel="settings" hidden>
         <h2>Last run error</h2>
         <p id="last-error" class="error"></p>
         <p id="last-error-time" class="muted"></p>
       </section>
 
-      <section id="panel-settings-privacy">
+      <section id="panel-settings-privacy" data-panel="settings">
         <h2>Privacy</h2>
         <p>
           When you click the toolbar icon, tab titles and URLs (origin and path only — no query
@@ -94,7 +94,7 @@
         </p>
       </section>
 
-      <section id="panel-logs" role="tabpanel" hidden>
+      <section id="panel-logs" role="tabpanel" data-panel="logs" hidden>
         <h2>Developer logs</h2>
         <p class="muted">
           <strong>Runs</strong> record what was sent to the model and what it returned.
@@ -120,7 +120,7 @@
         <p id="log-empty" class="muted" hidden>No records yet.</p>
       </section>
 
-      <section id="panel-settings-security">
+      <section id="panel-settings-security" data-panel="settings">
         <h2>Security note</h2>
         <p>
           Your API key is stored in plaintext in this browser's local extension storage. This is
