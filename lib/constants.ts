@@ -20,6 +20,9 @@ export const PROVIDERS: Record<ProviderId, Provider> = {
   },
 };
 
+/** Console prefix shared by every module that logs. */
+export const LOG_PREFIX = '[ai-tab-grouper]';
+
 export const LIMITS = {
   maxTabs: 50,
   minCandidates: 3,

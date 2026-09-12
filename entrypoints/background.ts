@@ -1,14 +1,13 @@
 import { clearBadge, setClosedFlash, setError, setPending, setSkip, reconcileOnStartup } from '@/lib/badge';
 import { clearLastError, getConfig, setLastError } from '@/lib/config';
-import { DEDUPE, LIMITS } from '@/lib/constants';
+import { DEDUPE, LIMITS, LOG_PREFIX } from '@/lib/constants';
 import { planDedupe } from '@/lib/dedupe';
 import { nativePort, selectPort } from '@/lib/grouping-port';
 import type { NativeTabGroupsApi, NativeTabsApi } from '@/lib/grouping-port';
 import { chatCompletion } from '@/lib/llm';
 import { newRunId, recordLog, updateLogRecord } from '@/lib/logger';
 import { toModelTabs } from '@/lib/model-input';
-import { parsePlan } from '@/lib/parse-groups';
-import { buildMessages, buildRetryMessages } from '@/lib/prompt';
+import { requestPlan } from '@/lib/run-plan';
 import { auditSelection, dedupeEligibilityReason, selectionContextFromGroups } from '@/lib/selection';
 import type { SelectionContext } from '@/lib/selection';
 import { bridgeApi, createBridgePort, DEFAULT_UI_EXTENSION_ID } from '@/lib/stackbridge';
@@ -16,8 +15,6 @@ import type { BridgeRuntime, BridgeTabsApi } from '@/lib/stackbridge';
 import { describeVivaldiSignals } from '@/lib/vivaldi';
 import type { Browser } from 'wxt/browser';
 import type { DedupeRecord, DedupeTabRecord, GroupingBackend, RunCall, RunRecord, SelectionRecord } from '@/lib/types';
-
-const LOG_PREFIX = '[ai-tab-grouper]';
 
 export default defineBackground(() => {
   void reconcileOnStartup();
@@ -128,48 +125,14 @@ export default defineBackground(() => {
       }
 
       const modelTabs = toModelTabs(candidates);
-      const messages = buildMessages(modelTabs);
       record.tabCount = modelTabs.length;
       console.log(`${LOG_PREFIX} Requesting grouping plan for ${modelTabs.length} tabs`);
 
+      // Caller-owned calls array: completed calls are visible to the finally-block persist even
+      // if a later call throws (same crash-diagnosability contract as before the extraction).
       const calls: RunCall[] = [];
-      const firstStartedAt = Date.now();
-      const first = await chatCompletion(config.apiKey, { messages, model: config.model });
-      calls.push({
-        ts: firstStartedAt,
-        durationMs: Date.now() - firstStartedAt,
-        model: first.model,
-        request: messages,
-        response: first.content,
-      });
       record.calls = calls;
-      console.log(`${LOG_PREFIX} Model ${first.model} responded in ${Date.now() - startedAt}ms`);
-      console.log(`${LOG_PREFIX} Raw response: ${first.content}`);
-
-      const validIds = new Set(modelTabs.map((t) => t.id));
-      let { plans, errors } = parsePlan(first.content, validIds);
-
-      if (plans.length === 0 && errors.length > 0) {
-        console.warn(`${LOG_PREFIX} Invalid plan, retrying once:`, errors);
-        calls[0]!.parseError = errors.join('; ');
-        const retryStartedAt = Date.now();
-        const retry = await chatCompletion(config.apiKey, {
-          messages: buildRetryMessages(messages, first.content, errors),
-          model: config.model,
-        });
-        calls.push({
-          ts: retryStartedAt,
-          durationMs: Date.now() - retryStartedAt,
-          model: retry.model,
-          request: buildRetryMessages(messages, first.content, errors),
-          response: retry.content,
-        });
-        console.log(`${LOG_PREFIX} Retry raw response: ${retry.content}`);
-        ({ plans, errors } = parsePlan(retry.content, validIds));
-        if (plans.length === 0 && errors.length > 0) {
-          throw new Error(`Model returned invalid grouping twice: ${errors.join('; ')}`);
-        }
-      }
+      const { plans, errors } = await requestPlan(chatCompletion, config.apiKey, modelTabs, calls, config.model);
       if (errors.length > 0) {
         console.warn(`${LOG_PREFIX} Partial issues ignored:`, errors);
       }
