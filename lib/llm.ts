@@ -10,10 +10,10 @@ export interface CompletionOptions {
 /**
  * Reasoning tokens count as output tokens, so the request asks for the lowest supported level.
  * There is no universal minimum: mandated-reasoning endpoints reject the parameter outright
- * (z-ai/glm-5.3-flash: 400 "Reasoning is mandatory and cannot be disabled"), while gateway-
- * routed MiMo models accept the parameter but have low/medium/high with no full-off level and
- * may still emit reasoning content. On rejection we remember it and retry once without the
- * parameter; the raised max_tokens budget keeps the final answer room either way.
+ * (z-ai/glm-5.3-flash: 400 "Reasoning is mandatory and cannot be disabled"), while some
+ * gateway-routed models accept the parameter but may still emit some reasoning content.
+ * On rejection we remember it and retry once without the parameter; the raised max_tokens
+ * budget keeps the final answer room either way.
  */
 let reasoningParamUnsupported = false;
 
@@ -31,7 +31,7 @@ function buildBody(opts: CompletionOptions, includeReasoning: boolean): Record<s
     max_tokens: opts.maxTokens ?? LIMITS.maxTokens,
     provider: { sort: 'throughput' },
   };
-  if (includeReasoning) body.reasoning = { effort: 'low' };
+  if (includeReasoning) body.reasoning = { effort: 'minimal' };
   return body;
 }
 

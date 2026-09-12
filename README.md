@@ -24,8 +24,9 @@ groups are created. One button, two states: idle and pending.
 5. The model returns a JSON grouping plan; the extension validates it and creates new tab
    groups via `tabs.group()` + `tabGroups.update()` (title set, default color, not collapsed).
 
-Provider: [OpenRouter](https://openrouter.ai) with the `openrouter/free` router (a free model
-is picked automatically) and `provider.sort: "throughput"` (the fastest provider serving it).
+Provider: [OpenRouter](https://openrouter.ai) with `google/gemini-3.5-flash-lite` (Google's
+lowest-latency lightweight model, suited to simple classification) and `provider.sort:
+"throughput"` (the fastest provider serving it).
 Requests time out after 60 seconds. Invalid model output is retried once with the validation
 errors appended.
 

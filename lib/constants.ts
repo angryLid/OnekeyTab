@@ -15,7 +15,7 @@ export const PROVIDERS: Record<ProviderId, Provider> = {
     label: 'OpenRouter',
     baseUrl: 'https://openrouter.ai/api/v1',
     chatPath: '/chat/completions',
-    model: 'xiaomi/mimo-v2.5',
+    model: 'google/gemini-3.5-flash-lite',
     extraHeaders: { 'X-Title': 'AI Tab Grouper' },
   },
 };
