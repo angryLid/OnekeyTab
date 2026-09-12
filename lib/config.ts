@@ -19,6 +19,14 @@ export async function setConfig(config: Config): Promise<void> {
   await browser.storage.local.set({ [CONFIG_KEY]: config });
 }
 
+/** Read-merge-write one config patch, preserving fields the caller does not mention; the single place that knows how a partial update is applied. */
+export async function updateConfig(patch: Partial<Config>): Promise<Config> {
+  const existing = await getConfig();
+  const next: Config = { provider: 'openrouter', apiKey: '', ...existing, ...patch };
+  await setConfig(next);
+  return next;
+}
+
 export async function getLastError(): Promise<LastError | null> {
   const res = await browser.storage.local.get(LAST_ERROR_KEY);
   return (res[LAST_ERROR_KEY] as LastError | undefined) ?? null;

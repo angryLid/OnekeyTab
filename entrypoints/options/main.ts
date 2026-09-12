@@ -1,6 +1,6 @@
 import './style.css';
 import { browser } from 'wxt/browser';
-import { getLastError, getConfig, setConfig } from '@/lib/config';
+import { getLastError, getConfig, setConfig, updateConfig } from '@/lib/config';
 import { BRIDGE, DEDUPE, LOG } from '@/lib/constants';
 import { verifyApiKey } from '@/lib/llm';
 import { clearLog, countRecords, getRecord, listRecent } from '@/lib/logger';
@@ -97,18 +97,14 @@ dedupeThreshold.addEventListener('input', renderThresholdLabel);
 saveDedupeButton.addEventListener('click', async () => {
   saveDedupeButton.disabled = true;
   try {
-    const existing = await getConfig();
     const ignoreGroupedValue = dedupeIgnoreGrouped.value;
-    await setConfig({
-      provider: existing?.provider ?? 'openrouter',
-      apiKey: existing?.apiKey ?? '',
+    await updateConfig({
       dedupe: {
         enabled: dedupeEnabled.checked,
         threshold: Number(dedupeThreshold.value),
         // 'auto' stores as absent so the Vivaldi runtime detection decides.
         ignoreGrouped: ignoreGroupedValue === 'auto' ? undefined : ignoreGroupedValue === 'always',
       },
-      groupingBackend: existing?.groupingBackend,
     });
     dedupeStatus.textContent = 'Dedupe settings saved.';
     dedupeStatus.className = 'ok';
@@ -123,13 +119,7 @@ saveDedupeButton.addEventListener('click', async () => {
 saveBackendButton.addEventListener('click', async () => {
   saveBackendButton.disabled = true;
   try {
-    const existing = await getConfig();
-    await setConfig({
-      provider: existing?.provider ?? 'openrouter',
-      apiKey: existing?.apiKey ?? '',
-      dedupe: existing?.dedupe,
-      groupingBackend: groupingBackend.value as GroupingBackend,
-    });
+    await updateConfig({ groupingBackend: groupingBackend.value as GroupingBackend });
     backendStatus.textContent = 'Backend saved.';
     backendStatus.className = 'ok';
   } catch (e) {
@@ -150,8 +140,7 @@ saveButton.addEventListener('click', async () => {
   setStatus('Verifying…', 'muted');
   try {
     await verifyApiKey(apiKey);
-    const existing = await getConfig();
-    await setConfig({ provider: 'openrouter', apiKey, dedupe: existing?.dedupe, groupingBackend: existing?.groupingBackend });
+    await updateConfig({ provider: 'openrouter', apiKey });
     setStatus('API key verified — saved.', 'ok');
     errorSection.hidden = true;
   } catch (e) {
