@@ -4,7 +4,6 @@ import { getLastError, getConfig, updateConfig } from '@/lib/config';
 import { BRIDGE, DEDUPE, LOG } from '@/lib/constants';
 import { verifyApiKey } from '@/lib/llm';
 import { clearLog, countRecords, getRecord, listRecent } from '@/lib/logger';
-import type { AnyLogRecord } from '@/lib/logger';
 import { bridgeApi, DEFAULT_UI_EXTENSION_ID, probeBridge } from '@/lib/stackbridge';
 import type { BridgeRuntime } from '@/lib/stackbridge';
 import { describeVivaldiSignals } from '@/lib/vivaldi';
