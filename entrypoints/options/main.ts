@@ -1,6 +1,6 @@
 import './style.css';
 import { browser } from 'wxt/browser';
-import { getLastError, getConfig, setConfig, updateConfig } from '@/lib/config';
+import { getLastError, getConfig, updateConfig } from '@/lib/config';
 import { BRIDGE, DEDUPE, LOG } from '@/lib/constants';
 import { verifyApiKey } from '@/lib/llm';
 import { clearLog, countRecords, getRecord, listRecent } from '@/lib/logger';
