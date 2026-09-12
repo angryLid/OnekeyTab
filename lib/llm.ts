@@ -17,6 +17,10 @@ export interface CompletionOptions {
  * On rejection we remember it and retry once without the parameter; the raised max_tokens
  * budget keeps the final answer room either way.
  */
+// Single provider today: llm.ts reads this one entry and nothing else. When a second provider
+// becomes real, thread Config.provider through chatCompletion instead of growing this list blind.
+const PROVIDER = PROVIDERS.openrouter;
+
 let reasoningParamUnsupported = false;
 
 /** Test hook: the endpoint quirk memory must not leak between test cases or builds. */
@@ -25,9 +29,8 @@ export function resetReasoningParamSupport(): void {
 }
 
 function buildBody(opts: CompletionOptions, includeReasoning: boolean): Record<string, unknown> {
-  const provider = PROVIDERS.openrouter;
   // resolveModel also guards against a whitespace/oversized id slipping into a request.
-  const model = isValidModelId(resolveModel(opts.model)) ? resolveModel(opts.model) : provider.model;
+  const model = isValidModelId(resolveModel(opts.model)) ? resolveModel(opts.model) : PROVIDER.model;
   const body: Record<string, unknown> = {
     model,
     messages: opts.messages,
@@ -40,19 +43,18 @@ function buildBody(opts: CompletionOptions, includeReasoning: boolean): Record<s
 }
 
 async function postChat(apiKey: string, opts: CompletionOptions): Promise<Record<string, unknown>> {
-  const provider = PROVIDERS.openrouter;
   for (let attempt = 0; attempt < 2; attempt++) {
     // First attempt asks to disable reasoning; a rejecting endpoint gets exactly one param-less retry.
     const includeReasoning = attempt === 0 && !reasoningParamUnsupported;
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), opts.timeoutMs ?? LIMITS.timeoutMs);
     try {
-      const res = await fetch(provider.baseUrl + provider.chatPath, {
+      const res = await fetch(PROVIDER.baseUrl + PROVIDER.chatPath, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${apiKey}`,
-          ...provider.extraHeaders,
+          ...PROVIDER.extraHeaders,
         },
         body: JSON.stringify(buildBody(opts, includeReasoning)),
         signal: controller.signal,

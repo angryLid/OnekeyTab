@@ -1,6 +1,7 @@
 export type ProviderId = 'openrouter';
 
 export interface Config {
+  /** Reserved: only 'openrouter' exists; llm.ts does not read this field yet. */
   provider: ProviderId;
   apiKey: string;
   /** Provider model id override; absent/empty = the built-in default in PROVIDERS. */
