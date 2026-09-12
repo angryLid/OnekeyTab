@@ -116,8 +116,8 @@ Chrome floor is raised to 121; tabs missing the field sort as oldest.
 ## Vivaldi exception
 
 Vivaldi (Chromium-based) replaces the native tab strip and does not render native tab groups:
-`groupId` exists in the data layer but is invisible in the UI (research and evidence in
-`docs/vivaldi-compatibility.md`). Without an exception, a Vivaldi window where every tab has
+`groupId` exists in the data layer but is invisible in the UI (platform facts in
+`docs/vivaldi.md`, port design in `docs/grouping-port.md`). Without an exception, a Vivaldi window where every tab has
 been grouped by earlier runs would show `eligible 4 · read 68` in the logs — the extension and
 the user would disagree about which tabs are "in use".
 

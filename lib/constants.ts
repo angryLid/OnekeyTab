@@ -69,6 +69,19 @@ export const BADGE = {
   skip: '✓',
 } as const;
 
+/** StackBridge protocol constants (Awesome-Vivaldi Bridge, envelope v1 — frozen upstream). */
+export const BRIDGE = {
+  /** Verified on a real Vivaldi 8.2 install; derived from a baked manifest key, so treat as configuration (Config.bridge.uiExtensionId). */
+  defaultUiExtensionId: 'mpognobbkildjkofajifpdfhcoklimli',
+  protocolVersion: 1,
+  /** A missing mod fails fast; the timeout only bites when the mod hangs. */
+  pingTimeoutMs: 3_000,
+  requestTimeoutMs: 8_000,
+  /** Vivaldi's own fixed-title cap; longer plan names are truncated client-side so logs match reality. */
+  nameMax: 50,
+  installDocsUrl: 'https://github.com/angryLid/Awesome-Vivaldi/tree/main/Bridge',
+} as const;
+
 export const BADGE_COLORS = {
   pending: '#808080',
   error: '#d93025',

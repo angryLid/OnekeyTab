@@ -7,6 +7,13 @@ export interface Config {
   dedupe?: DedupeConfig;
   /** Grouping write backend; configs stored before the feature read as 'auto'. */
   groupingBackend?: GroupingBackend;
+  /** StackBridge endpoint settings; absent = built-in defaults. */
+  bridge?: BridgeConfig;
+}
+
+export interface BridgeConfig {
+  /** StackBridge endpoint override (the Vivaldi UI extension id); default lives in BRIDGE constants. */
+  uiExtensionId?: string;
 }
 
 export interface DedupeConfig {
@@ -56,23 +63,46 @@ export interface ApplyReport {
   backend: EffectiveBackend;
 }
 
-// ---- Vivaldi stacks ----
+// ---- Grouping ports ----
 
 export type GroupingBackend = 'auto' | 'native' | 'stacks';
 
 /** Backend actually used for a run; 'auto' resolves to one of these before anything is written. */
 export type EffectiveBackend = 'native' | 'stacks';
 
-export type StackProbeReason = 'write-rejected' | 'error';
+export type PortId = 'native' | 'vivaldi-bridge';
 
-export interface StackProbeResult {
-  supported: boolean;
-  reason?: StackProbeReason;
+/** Declared per port; selection and dedupe consume caps instead of branching on the browser. */
+export interface PortCaps {
+  /** Informational: the browser renders the groups this port writes (true for both current ports). */
+  visibleGroups: boolean;
+  /** When false, native Chromium groupIds are invisible/stale state and never gate candidacy (Vivaldi). */
+  nativeGroupsTrustworthy: boolean;
+  /** Informational: hand-made groups are readable through listGroups (Bridge: yes via stacks.list; native: yes via groupIds). */
+  userGroupsReadable: boolean;
+  /** Exclusion label for visible-group membership: 'grouped' is config-droppable in dedupe, 'stacked' never. */
+  visibleGroupReason: 'grouped' | 'stacked';
+}
+
+/** A visible group as the active port reports it; membership is the sole exclusion input. */
+export interface GroupInfo {
+  /** Port-native id (Chromium groupId as a string, or the Bridge stack id). */
+  id: string;
+  /** Display name; '' when unnamed — selection consumes membership, not names. */
+  name: string;
+  tabIds: number[];
+}
+
+export type PortProbeReason = 'no-listener' | 'timeout' | 'not-paired' | 'unsupported' | 'error';
+
+export interface PortProbeResult {
+  ok: boolean;
+  reason?: PortProbeReason;
   detail?: string;
 }
 
 /** Probe outcome as stored on a run record. */
-export interface StackProbeRecord extends StackProbeResult {
+export interface PortProbeRecord extends PortProbeResult {
   ts: number;
 }
 
@@ -94,7 +124,7 @@ export interface AuditTab {
   pinned: boolean;
   /** Present only for tabs that are in a group (> 0). */
   groupId?: number;
-  /** Vivaldi stack id (vivExtData.group) when the tab is a visible stack member. */
+  /** Visible stack member per the active port (bridge stacks.list); set only when the exclusion reason is 'stacked'. */
   stackId?: string;
   /** Present only for over-cap exclusions, where recency decides. */
   lastAccessed?: number;
@@ -155,8 +185,8 @@ export interface RunRecord {
   dedupeId?: string;
   /** Backend that applied (or attempted to apply) the plan. */
   backend?: EffectiveBackend;
-  /** Stack capability probe outcome, present whenever the stacks backend was considered. */
-  stackProbe?: StackProbeRecord;
+  /** Bridge probe outcome; present on Vivaldi runs only (native needs no probe). */
+  probe?: PortProbeRecord;
 }
 
 // ---- Dedupe ----

@@ -90,7 +90,7 @@ export function describeVivaldiSignals(
  * URL (vivaldi:// scheme, chrome://vivaldi-webui/ start page, or the internal UI extension
  * origin). On Vivaldi >= 6.7 prefer hasVivaldiWindowSignals — the tab-level field is gone.
  * Independent of the User-Agent brand masking Vivaldi applies by default
- * (docs/vivaldi-compatibility.md).
+ * (docs/vivaldi.md).
  */
 export function hasVivaldiTabSignals(tabs: ReadonlyArray<object>): boolean {
   return tabs.some(

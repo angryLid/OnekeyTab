@@ -1,9 +1,13 @@
 import './style.css';
+import { browser } from 'wxt/browser';
 import { getLastError, getConfig, setConfig } from '@/lib/config';
+import { BRIDGE, DEDUPE, LOG } from '@/lib/constants';
 import { verifyApiKey } from '@/lib/llm';
-import { DEDUPE, LOG } from '@/lib/constants';
 import { clearLog, countRecords, getRecord, listRecent } from '@/lib/logger';
 import type { AnyLogRecord } from '@/lib/logger';
+import { bridgeApi, DEFAULT_UI_EXTENSION_ID, probeBridge } from '@/lib/stackbridge';
+import type { BridgeRuntime } from '@/lib/stackbridge';
+import { describeVivaldiSignals } from '@/lib/vivaldi';
 import type { AuditTab, DedupeRecord, ExclusionReason, GroupingBackend, LogIndexEntry, LogKind, RunRecord, SelectionRecord } from '@/lib/types';
 
 const input = document.querySelector<HTMLInputElement>('#api-key')!;
@@ -27,6 +31,43 @@ const lastErrorTime = document.querySelector<HTMLParagraphElement>('#last-error-
 function setStatus(message: string, kind: 'ok' | 'error' | 'muted'): void {
   status.textContent = message;
   status.className = kind;
+}
+
+/**
+ * StackBridge status line: detect Vivaldi, ping the bridge, and reflect both in the UI.
+ * On Vivaldi the native backend option is greyed out — invisible groups are not shipped
+ * behavior there (docs/grouping-port.md), so offering the setting would be a trap.
+ */
+async function refreshBridgeStatus(): Promise<void> {
+  const statusLine = document.querySelector<HTMLParagraphElement>('#bridge-status')!;
+  try {
+    const [tabs, windows] = await Promise.all([browser.tabs.query({}), browser.windows.getAll()]);
+    const vivaldi = describeVivaldiSignals(tabs, navigator, windows);
+    if (vivaldi.signals.length === 0) {
+      statusLine.textContent = 'Not Vivaldi — grouping uses native tab groups.';
+      return;
+    }
+    groupingBackend.querySelector<HTMLOptionElement>('option[value="native"]')!.disabled = true;
+    // Display coherence with the runtime coercion: a stored 'native' cannot run on Vivaldi.
+    if (groupingBackend.value === 'native') groupingBackend.value = 'auto';
+    const config = await getConfig();
+    const extId = config?.bridge?.uiExtensionId?.trim() || DEFAULT_UI_EXTENSION_ID;
+    const probe = await probeBridge(bridgeApi(browser.runtime as unknown as BridgeRuntime), extId);
+    if (probe.ok) {
+      statusLine.textContent = 'StackBridge: detected. Grouping on Vivaldi creates real Tab Stacks.';
+    } else if (probe.reason === 'no-listener') {
+      statusLine.textContent =
+        `StackBridge: not detected. Grouping on Vivaldi requires the mod (clicks will not run until it is installed) — install guide: ${BRIDGE.installDocsUrl}`;
+    } else if (probe.reason === 'timeout') {
+      statusLine.textContent = `StackBridge: installed but not responding. Restart Vivaldi or reinstall the mod (${BRIDGE.installDocsUrl}).`;
+    } else if (probe.reason === 'not-paired') {
+      statusLine.textContent = 'StackBridge: paired mode rejected this extension. Pair it in the window.html console: StackBridge.pair(<extension id>).';
+    } else {
+      statusLine.textContent = `StackBridge: unusable (${probe.reason ?? 'unknown'}${probe.detail ? `: ${probe.detail}` : ''}). See ${BRIDGE.installDocsUrl}`;
+    }
+  } catch (e) {
+    statusLine.textContent = `StackBridge status unknown: ${(e as Error).message}`;
+  }
 }
 
 async function initSettings(): Promise<void> {
@@ -246,8 +287,8 @@ function renderDetail(detail: HTMLDivElement, record: RunRecord): void {
   if (record.error) parts.push(`<p class="error">${escapeHtml(record.error)}</p>`);
   if (record.windowId != null) parts.push(`<p class="muted">window ${record.windowId} · total ${record.durationMs}ms</p>`);
   if (record.backend) {
-    const probe = record.stackProbe;
-    const probeLabel = probe == null ? '' : probe.supported ? ' · stack probe ok' : ` · stack probe failed (${escapeHtml(probe.reason ?? 'unknown')})`;
+    const probe = record.probe;
+    const probeLabel = probe == null ? '' : probe.ok ? ' · bridge probe ok' : ` · bridge probe failed (${escapeHtml(probe.reason ?? 'unknown')})`;
     parts.push(`<p class="muted">backend ${record.backend}${probeLabel}</p>`);
   }
   if (record.calls?.length) {
@@ -459,6 +500,7 @@ document.querySelector<HTMLButtonElement>('#clear-log')!.addEventListener('click
 // ---- Boot ----
 
 void initSettings();
+void refreshBridgeStatus();
 
 document.querySelector<HTMLButtonElement>('#tab-settings')!.addEventListener('click', () => activateTab('settings'));
 document.querySelector<HTMLButtonElement>('#tab-logs')!.addEventListener('click', () => activateTab('logs'));

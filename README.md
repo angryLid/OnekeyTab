@@ -22,7 +22,9 @@ groups are created. One button, two states: idle and pending.
 4. Each candidate is sent to the model as `{ id, title (max 200 chars), url (origin + path,
    query parameters stripped) }`.
 5. The model returns a JSON grouping plan; the extension validates it and creates new tab
-   groups via `tabs.group()` + `tabGroups.update()` (title set, default color, not collapsed).
+   groups. On Chrome/Firefox that is `tabs.group()` + `tabGroups.update()` (title set, default
+   color, not collapsed); on Vivaldi it is real Tab Stacks written through the StackBridge mod
+   (see `docs/grouping-port.md` and `docs/vivaldi.md`).
 
 Provider: [OpenRouter](https://openrouter.ai) with `google/gemini-3.5-flash-lite` (Google's
 lowest-latency lightweight model, suited to simple classification) and `provider.sort:
@@ -48,10 +50,10 @@ lands in a deliberately narrow band: identical path with any differing query par
 path segment scores 0.77 (closed — same page, tracking spam). Different Google Docs, wiki
 articles, repos, and SPA hash views score ≤ 0.65 and survive.
 
-**Vivaldi exception:** Vivaldi never renders native tab groups, so a `groupId` there is
-invisible state. On Vivaldi the dedupe eligibility chain skips the `grouped` rule — grouped
-tabs participate in dedupe and can be closed; `vivaldi://` pages are treated as internal. See
-`docs/design-dedupe.md` and `docs/vivaldi-compatibility.md`.
+**Vivaldi exception:** On Vivaldi, grouping runs through the StackBridge mod (real Tab
+Stacks); invisible native groupIds there are untrusted and never gate candidacy, so the dedupe
+eligibility chain skips the `grouped` rule and `vivaldi://` pages are treated as internal. See
+`docs/design-dedupe.md` and `docs/vivaldi.md`.
 
 ## Button states
 
@@ -151,9 +153,9 @@ developer tool.
   key.
 - The dedupe pre-pass only runs when an API key is configured (a click without a key opens the
   settings page first).
-- On Vivaldi, native tab groups are never rendered in the UI (data layer only); the dedupe
-  pre-pass compensates by treating already-grouped tabs as eligible there. Grouping itself
-  still writes invisible groupIds; see `docs/vivaldi-compatibility.md`.
+- On Vivaldi, grouping requires the StackBridge mod (Awesome-Vivaldi Bridge); without it the
+  extension does not run — a click opens the settings page, same as a missing API key. See
+  `docs/vivaldi.md`.
 - Browsers show a native beforeunload confirmation when closing a tab with unsaved input, and
   there is no API to skip it; a tab the user declines to close survives and is logged as
   `declined` (it then flows into grouping as usual).

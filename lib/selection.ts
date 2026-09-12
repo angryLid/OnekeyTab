@@ -1,7 +1,7 @@
 import type { Browser } from 'wxt/browser';
 import { LIMITS } from './constants';
 import { sanitizeUrl } from './model-input';
-import { stackIdOf } from './vivaldi-stacks';
+import type { GroupInfo, PortCaps } from './types';
 import type { AuditTab, ExclusionReason } from './types';
 
 const INTERNAL_SCHEMES = ['about:', 'chrome:', 'edge:', 'chrome-extension:', 'moz-extension:', 'extension:', 'vivaldi:'];
@@ -16,37 +16,70 @@ function isUngrouped(tab: Browser.tabs.Tab): boolean {
 }
 
 /**
- * Dedupe eligibility: the selection chain, but on Vivaldi the `grouped` rule is ignored —
- * Vivaldi does not render native tab groups, so a groupId there is invisible state that must
- * not hide tabs from dedupe (closing one just shrinks an unrendered group). The `stacked`
- * rule is never ignored: a stack member is visible, so closing its duplicate visibly shrinks
- * a user-facing stack — same policy as Chrome groups.
+ * The selection context: what the active port says about grouping in this window. Built from
+ * `port.caps` + `port.listGroups` (selectionContextFromGroups); the default reproduces
+ * Chrome-native semantics from raw tab groupIds, so tests and tooling need no port at all.
  */
-export function dedupeEligibilityReason(tab: Browser.tabs.Tab, ignoreGrouped: boolean): ExclusionReason | null {
-  const reason = firstExclusionReason(tab);
-  if (reason === 'grouped' && ignoreGrouped) return null;
-  return reason;
+export interface SelectionContext {
+  /** Tab id -> visible group id, from the active port's listGroups. */
+  stacks: ReadonlyMap<number, string>;
+  /** Label the port's visible-group membership excludes under: 'grouped' is droppable in dedupe, 'stacked' never. */
+  visibleGroupReason: 'grouped' | 'stacked';
+  /** When false, native groupIds are invisible/stale state and never exclude (Vivaldi). */
+  nativeGroupsTrustworthy: boolean;
 }
 
-/** First exclusion rule the tab trips, in filter-chain order; null when it is a candidate. Stacked (a Vivaldi vivExtData.group) is checked before native grouped so a leftover invisible groupId can never downgrade a visible stack member into the droppable grouped case. */
-export function firstExclusionReason(tab: Browser.tabs.Tab): ExclusionReason | null {
+export function selectionContextFromGroups(
+  groups: readonly GroupInfo[],
+  caps: Pick<PortCaps, 'visibleGroupReason' | 'nativeGroupsTrustworthy'>,
+): SelectionContext {
+  const stacks = new Map<number, string>();
+  for (const group of groups) {
+    for (const tabId of group.tabIds) stacks.set(tabId, group.id);
+  }
+  return { stacks, visibleGroupReason: caps.visibleGroupReason, nativeGroupsTrustworthy: caps.nativeGroupsTrustworthy };
+}
+
+/** Chrome-parity context derived straight from tab groupIds; the default when no port context exists. */
+export function defaultSelectionContext(tabs: readonly Browser.tabs.Tab[]): SelectionContext {
+  const stacks = new Map<number, string>();
+  for (const tab of tabs) {
+    if (tab.id != null && !isUngrouped(tab)) stacks.set(tab.id, String(tab.groupId));
+  }
+  return { stacks, visibleGroupReason: 'grouped', nativeGroupsTrustworthy: true };
+}
+
+/** First exclusion rule the tab trips, in filter-chain order; null when it is a candidate. */
+export function exclusionReason(tab: Browser.tabs.Tab, ctx: SelectionContext): ExclusionReason | null {
   if (tab.id == null) return 'no-id';
   if (tab.pinned) return 'pinned';
-  if (stackIdOf(tab) != null) return 'stacked';
-  if (!isUngrouped(tab)) return 'grouped';
+  // Visible-group membership first: under a bridge context a leftover invisible groupId must
+  // never downgrade a visible stack member into the (droppable) grouped case.
+  if (ctx.stacks.get(tab.id) != null) return ctx.visibleGroupReason;
+  if (ctx.nativeGroupsTrustworthy && !isUngrouped(tab)) return 'grouped';
   if (typeof tab.url !== 'string' || tab.url.length === 0) return 'no-url';
   if (isInternalUrl(tab.url)) return 'internal-url';
   return null;
 }
 
-export interface SelectionOptions {
-  /** Vivaldi: native groupIds are invisible and possibly stale, so they must not hide tabs from grouping (the dedupe exception, generalized). */
-  treatNativeGroupedAsUngrouped?: boolean;
+/** Convenience wrapper over exclusionReason with the Chrome-default context. */
+export function firstExclusionReason(tab: Browser.tabs.Tab): ExclusionReason | null {
+  return exclusionReason(tab, defaultSelectionContext([tab]));
 }
 
-function effectiveReason(tab: Browser.tabs.Tab, options: SelectionOptions): ExclusionReason | null {
-  const reason = firstExclusionReason(tab);
-  if (reason === 'grouped' && options.treatNativeGroupedAsUngrouped) return null;
+/**
+ * Dedupe eligibility: the selection chain, with the `grouped` rule ignorable — on Vivaldi a
+ * groupId is invisible state that must not hide tabs from dedupe (closing one just shrinks an
+ * unrendered group). The visible-stack rule (`stacked`) is never ignored: a stack member is
+ * visible, so closing its duplicate visibly shrinks a user-facing stack.
+ */
+export function dedupeEligibilityReason(
+  tab: Browser.tabs.Tab,
+  ctx: SelectionContext,
+  ignoreGrouped: boolean,
+): ExclusionReason | null {
+  const reason = exclusionReason(tab, ctx);
+  if (reason === 'grouped' && ignoreGrouped) return null;
   return reason;
 }
 
@@ -62,19 +95,19 @@ export interface SelectionAudit {
  * The one source of truth for candidate selection — `selectCandidates` derives from this,
  * so the audit can never disagree with what the model actually receives.
  */
-export function auditSelection(tabs: Browser.tabs.Tab[], options: SelectionOptions = {}): SelectionAudit {
-  const passing = tabs.filter((tab) => effectiveReason(tab, options) == null);
+export function auditSelection(tabs: Browser.tabs.Tab[], context: SelectionContext = defaultSelectionContext(tabs)): SelectionAudit {
+  const passing = tabs.filter((tab) => exclusionReason(tab, context) == null);
   passing.sort((a, b) => (b.lastAccessed ?? 0) - (a.lastAccessed ?? 0));
   const candidates = passing.slice(0, LIMITS.maxTabs);
   const capped = new Set(candidates.map((tab) => tab.id as number));
   const audited = tabs.map((tab): AuditTab => {
-    const reason = effectiveReason(tab, options) ?? (capped.has(tab.id as number) ? null : 'over-cap');
-    return toAuditTab(tab, reason);
+    const reason = exclusionReason(tab, context) ?? (capped.has(tab.id as number) ? null : 'over-cap');
+    return toAuditTab(tab, reason, context);
   });
   return { tabs: audited, candidates };
 }
 
-function toAuditTab(tab: Browser.tabs.Tab, reason: ExclusionReason | null): AuditTab {
+function toAuditTab(tab: Browser.tabs.Tab, reason: ExclusionReason | null, ctx: SelectionContext): AuditTab {
   const audit: AuditTab = {
     id: tab.id ?? null,
     title: (tab.title ?? '').slice(0, LIMITS.titleMax),
@@ -83,13 +116,18 @@ function toAuditTab(tab: Browser.tabs.Tab, reason: ExclusionReason | null): Audi
   };
   if (typeof tab.url === 'string' && tab.url.length > 0) audit.url = sanitizeUrl(tab.url);
   if (tab.groupId != null && tab.groupId > 0) audit.groupId = tab.groupId;
-  const stackId = stackIdOf(tab);
-  if (stackId != null) audit.stackId = stackId;
+  if (reason === 'stacked' && tab.id != null) {
+    const stackId = ctx.stacks.get(tab.id);
+    if (stackId != null) audit.stackId = stackId;
+  }
   if (reason === 'over-cap') audit.lastAccessed = tab.lastAccessed;
   if (reason != null) audit.reason = reason;
   return audit;
 }
 
-export function selectCandidates(tabs: Browser.tabs.Tab[], options: SelectionOptions = {}): Browser.tabs.Tab[] {
-  return auditSelection(tabs, options).candidates;
+export function selectCandidates(
+  tabs: Browser.tabs.Tab[],
+  context: SelectionContext = defaultSelectionContext(tabs),
+): Browser.tabs.Tab[] {
+  return auditSelection(tabs, context).candidates;
 }

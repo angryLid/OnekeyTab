@@ -1,18 +1,21 @@
-import { applyPlans, stackApi } from '@/lib/apply-groups';
 import { clearBadge, setClosedFlash, setError, setPending, setSkip, reconcileOnStartup } from '@/lib/badge';
 import { clearLastError, getConfig, setLastError } from '@/lib/config';
 import { DEDUPE, LIMITS } from '@/lib/constants';
 import { planDedupe } from '@/lib/dedupe';
+import { nativePort, selectPort } from '@/lib/grouping-port';
+import type { NativeTabGroupsApi, NativeTabsApi } from '@/lib/grouping-port';
 import { chatCompletion } from '@/lib/llm';
 import { newRunId, recordLog, updateLogRecord } from '@/lib/logger';
 import { toModelTabs } from '@/lib/model-input';
 import { parsePlan } from '@/lib/parse-groups';
 import { buildMessages, buildRetryMessages } from '@/lib/prompt';
-import { auditSelection, dedupeEligibilityReason } from '@/lib/selection';
+import { auditSelection, dedupeEligibilityReason, selectionContextFromGroups } from '@/lib/selection';
+import type { SelectionContext } from '@/lib/selection';
+import { bridgeApi, createBridgePort, DEFAULT_UI_EXTENSION_ID } from '@/lib/stackbridge';
+import type { BridgeRuntime, BridgeTabsApi } from '@/lib/stackbridge';
 import { describeVivaldiSignals } from '@/lib/vivaldi';
-import { probeStackSupport } from '@/lib/vivaldi-stacks';
 import type { Browser } from 'wxt/browser';
-import type { DedupeRecord, DedupeTabRecord, EffectiveBackend, RunCall, RunRecord, SelectionRecord } from '@/lib/types';
+import type { DedupeRecord, DedupeTabRecord, GroupingBackend, RunCall, RunRecord, SelectionRecord } from '@/lib/types';
 
 const LOG_PREFIX = '[ai-tab-grouper]';
 
@@ -53,43 +56,66 @@ export default defineBackground(() => {
     // getConfig merges defaults, so dedupe settings are always present at runtime.
     const dedupeConfig = config.dedupe ?? { enabled: true, threshold: DEDUPE.threshold };
     try {
-      // Detection is browser-wide and feeds both the dedupe exception and the backend choice,
-      // so it runs once regardless of the dedupe toggle. Vivaldi-ness is a property of the
-      // browser, and window/tab signals may live in any window, not just this one.
+      // Detection is browser-wide and decides both the port and the dedupe default; Vivaldi-ness
+      // is a property of the browser, and window/tab signals may live in any window.
       const [allTabs, allWindows] = await Promise.all([browser.tabs.query({}), browser.windows.getAll()]);
       const vivaldiSignals = describeVivaldiSignals(allTabs, navigator, allWindows);
       const isVivaldi = vivaldiSignals.signals.length > 0;
       if (isVivaldi) console.log(`${LOG_PREFIX} Vivaldi detected via: ${vivaldiSignals.signals.join(', ')}`);
 
-      // Backend matrix: 'auto' = stacks on Vivaldi when the capability probe passes, native
-      // everywhere else. Forced 'stacks' bypasses the probe cache every run so a broken probe
-      // stays diagnosable instead of silently cached. The probe creates and removes its own
-      // about:blank tab before the window query below, so it never enters dedupe/selection.
-      const setting = config.groupingBackend ?? 'auto';
-      let backend: EffectiveBackend = 'native';
-      if (setting === 'stacks' || isVivaldi) {
-        const probe = await probeStackSupport(stackApi(), setting === 'stacks');
-        record.stackProbe = { ...probe, ts: Date.now() };
-        if (probe.supported) backend = 'stacks';
-        else console.warn(`${LOG_PREFIX} Stack backend unavailable (${probe.reason}${probe.detail ? `: ${probe.detail}` : ''}); native groups will be used.`);
+      // Bridge-or-nothing on Vivaldi: an unreachable StackBridge mod blocks the whole run exactly
+      // like a missing API key (grouping decision in docs/grouping-port.md).
+      const setting: GroupingBackend = config.groupingBackend ?? 'auto';
+      const uiExtensionId = config.bridge?.uiExtensionId?.trim() || DEFAULT_UI_EXTENSION_ID;
+      // The single place WXT's browser types meet the wxt-free port layer; the casts live here so
+      // every lib module (and every test) stays free of any browser environment.
+      const bridge = createBridgePort(
+        bridgeApi(browser.runtime as unknown as BridgeRuntime),
+        uiExtensionId,
+        () => (config.groupingBackend ?? 'auto') === 'stacks',
+        browser.tabs as unknown as BridgeTabsApi,
+      );
+      const decision = await selectPort(
+        { isVivaldi },
+        setting,
+        {
+          native: nativePort(
+            browser.tabs as unknown as NativeTabsApi,
+            browser.tabGroups as unknown as NativeTabGroupsApi,
+          ),
+          bridge,
+        },
+      );
+      if (decision.kind === 'blocked') {
+        record.outcome = 'error';
+        record.reason = decision.reason;
+        record.probe = decision.probe;
+        await clearBadge();
+        await browser.runtime.openOptionsPage();
+        return; // the run record is persisted by the finally block, like the skip path
       }
-      record.backend = backend;
+      const port = decision.port;
+      record.backend = decision.backend;
+      record.probe = decision.probe;
 
       const tabs = await browser.tabs.query({ windowId });
+      // Authoritative visible-group membership for exclusion; read once per run, before dedupe —
+      // stacked tabs are never dedupe-eligible, so nothing the pre-pass closes can invalidate it.
+      const groups = await port.listGroups(windowId);
+      const selectionContext = selectionContextFromGroups(groups, port.caps);
+
       let workingTabs = tabs;
       let dedupeClosed = 0;
       if (dedupeConfig.enabled) {
-        // Manual override wins; otherwise auto-detect Vivaldi, whose native tab groups render nowhere.
-        const ignoreGrouped = dedupeConfig.ignoreGrouped ?? isVivaldi;
-        dedupeClosed = await runDedupe(record, tabs, dedupeConfig.threshold, windowId, ignoreGrouped);
+        // Vivaldi's groupId is not trustworthy (invisible and possibly stale), so the dedupe
+        // grouped rule is dropped there by default; Chrome keeps trusting it (user groups).
+        const ignoreGrouped = dedupeConfig.ignoreGrouped ?? !port.caps.nativeGroupsTrustworthy;
+        dedupeClosed = await runDedupe(record, tabs, dedupeConfig.threshold, windowId, ignoreGrouped, selectionContext);
         if (dedupeClosed > 0) workingTabs = await browser.tabs.query({ windowId });
       }
-      // Vivaldi's groupId is not trustworthy (invisible and possibly stale), so on Vivaldi it
-      // never gates candidacy or re-grouping — the dedupe exception, generalized to the whole
-      // pipeline. Chrome keeps trusting groupId so user-made groups are not disturbed.
-      const audit = auditSelection(workingTabs, { treatNativeGroupedAsUngrouped: isVivaldi });
+      const audit = auditSelection(workingTabs, selectionContext);
       const candidates = audit.candidates;
-      record.selectionId = await persistSelection(audit, windowId, record.id, backend);
+      record.selectionId = await persistSelection(audit, windowId, record.id, decision.backend);
       console.log(`${LOG_PREFIX} ${candidates.length} candidate tabs in window ${windowId}`);
       if (candidates.length < LIMITS.minCandidates) {
         console.log(`${LOG_PREFIX} Skipped: fewer than ${LIMITS.minCandidates} candidates`);
@@ -147,7 +173,7 @@ export default defineBackground(() => {
       }
 
       console.log(`${LOG_PREFIX} Plan: ${plans.length} groups`, plans);
-      const report = await applyPlans(plans, windowId, backend, { treatGroupedAsUngrouped: isVivaldi });
+      const report = await port.apply(plans, windowId);
       console.log(
         `${LOG_PREFIX} Applied ${report.applied}, skipped ${report.skipped}, failed ${report.failed} via ${report.backend}`,
         report.failures,
@@ -191,8 +217,9 @@ export default defineBackground(() => {
     threshold: number,
     windowId: number,
     ignoreGrouped: boolean,
+    selectionContext: SelectionContext,
   ): Promise<number> {
-    const eligible = tabs.filter((t) => dedupeEligibilityReason(t, ignoreGrouped) == null);
+    const eligible = tabs.filter((t) => dedupeEligibilityReason(t, selectionContext, ignoreGrouped) == null);
     const plan = planDedupe(eligible, threshold);
     const tabById = new Map(eligible.map((t) => [t.id as number, t]));
     const entries: DedupeTabRecord[] = plan.entries.map((entry) => {
@@ -260,7 +287,7 @@ export default defineBackground(() => {
     audit: ReturnType<typeof auditSelection>,
     windowId: number,
     runId: string,
-    backend: EffectiveBackend,
+    backend: RunRecord['backend'],
   ): Promise<string | undefined> {
     const selected = audit.tabs.filter((t) => t.selected);
     const selection: SelectionRecord = {
