@@ -8,8 +8,6 @@ export interface Config {
   model?: string;
   /** Pre-group dedupe settings; absent in configs stored before the feature existed. */
   dedupe?: DedupeConfig;
-  /** Grouping write backend; configs stored before the feature read as 'auto'. */
-  groupingBackend?: GroupingBackend;
   /** StackBridge endpoint settings; absent = built-in defaults. */
   bridge?: BridgeConfig;
 }
@@ -67,8 +65,6 @@ export interface ApplyReport {
 }
 
 // ---- Grouping ports ----
-
-export type GroupingBackend = 'auto' | 'native' | 'stacks';
 
 /** True when a Chromium groupId does not denote a real group (absent, 0, or a negative sentinel). */
 export function isUngroupedGroupId(groupId: number | null | undefined): boolean {

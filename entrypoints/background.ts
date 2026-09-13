@@ -14,7 +14,7 @@ import { bridgeApi, createBridgePort, DEFAULT_UI_EXTENSION_ID } from '@/lib/stac
 import type { BridgeRuntime, BridgeTabsApi } from '@/lib/stackbridge';
 import { describeVivaldiSignals } from '@/lib/vivaldi';
 import type { Browser } from 'wxt/browser';
-import type { DedupeRecord, DedupeTabRecord, GroupingBackend, RunCall, RunRecord, SelectionRecord } from '@/lib/types';
+import type { DedupeRecord, DedupeTabRecord, RunCall, RunRecord, SelectionRecord } from '@/lib/types';
 
 export default defineBackground(() => {
   void reconcileOnStartup();
@@ -63,19 +63,16 @@ export default defineBackground(() => {
 
       // Bridge-or-nothing on Vivaldi: an unreachable StackBridge mod blocks the whole run exactly
       // like a missing API key (grouping decision in docs/grouping-port.md).
-      const setting: GroupingBackend = config.groupingBackend ?? 'auto';
       const uiExtensionId = config.bridge?.uiExtensionId?.trim() || DEFAULT_UI_EXTENSION_ID;
       // The single place WXT's browser types meet the wxt-free port layer; the casts live here so
       // every lib module (and every test) stays free of any browser environment.
       const bridge = createBridgePort(
         bridgeApi(browser.runtime as unknown as BridgeRuntime),
         uiExtensionId,
-        () => (config.groupingBackend ?? 'auto') === 'stacks',
         browser.tabs as unknown as BridgeTabsApi,
       );
       const decision = await selectPort(
         { isVivaldi },
-        setting,
         {
           native: nativePort(
             browser.tabs as unknown as NativeTabsApi,

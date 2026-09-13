@@ -75,7 +75,7 @@ beforeEach(() => {
 describe('probeBridge', () => {
   it('sends a v1 request envelope and reports ok on a healthy bridge', async () => {
     const { api, calls } = happyApi();
-    const result = await probeBridge(api, UI_ID, true);
+    const result = await probeBridge(api, UI_ID);
     expect(result).toEqual({ ok: true });
     const [ping] = calls;
     expect(ping?.extId).toBe(UI_ID);
@@ -83,20 +83,18 @@ describe('probeBridge', () => {
     expect(typeof ping?.message.id).toBe('string');
   });
 
-  it('memoizes per worker lifetime; force bypasses the cache', async () => {
+  it('memoizes per worker lifetime', async () => {
     const { api, calls } = happyApi();
     await probeBridge(api, UI_ID);
     await probeBridge(api, UI_ID);
     expect(calls.filter((c) => c.message.action === 'bridge.ping')).toHaveLength(1);
-    await probeBridge(api, UI_ID, true);
-    expect(calls.filter((c) => c.message.action === 'bridge.ping')).toHaveLength(2);
   });
 
   it('classifies an absent receiver as no-listener', async () => {
     const { api } = fakeApi(() => {
       throw new Error('Could not establish connection. Receiving end does not exist.');
     });
-    const result = await probeBridge(api, UI_ID, true);
+    const result = await probeBridge(api, UI_ID);
     expect(result).toMatchObject({ ok: false, reason: 'no-listener' });
   });
 
@@ -104,7 +102,7 @@ describe('probeBridge', () => {
     vi.useFakeTimers();
     try {
       const { api } = fakeApi(() => new Promise(() => {}));
-      const pending = probeBridge(api, UI_ID, true);
+      const pending = probeBridge(api, UI_ID);
       const expectation = expect(pending).resolves.toMatchObject({ ok: false, reason: 'timeout' });
       await vi.advanceTimersByTimeAsync(BRIDGE.pingTimeoutMs + 10);
       await expectation;
@@ -115,7 +113,7 @@ describe('probeBridge', () => {
 
   it('classifies a NOT_PAIRED error as not-paired', async () => {
     const { api } = fakeApi((message) => errResp(String(message.id), 'NOT_PAIRED', 'Extension not paired.'));
-    const result = await probeBridge(api, UI_ID, true);
+    const result = await probeBridge(api, UI_ID);
     expect(result).toMatchObject({ ok: false, reason: 'not-paired' });
   });
 
@@ -124,7 +122,7 @@ describe('probeBridge', () => {
       if (message.action === 'bridge.capabilities') return ok(String(message.id), { protocol: 99, actions: [] });
       return ok(String(message.id));
     });
-    const result = await probeBridge(api, UI_ID, true);
+    const result = await probeBridge(api, UI_ID);
     expect(result).toMatchObject({ ok: false, reason: 'unsupported', detail: expect.stringContaining('protocol 99') });
   });
 
@@ -133,7 +131,7 @@ describe('probeBridge', () => {
       if (message.action === 'bridge.capabilities') return ok(String(message.id), { protocol: 1, versions: [1], actions: ['bridge.ping', 'stacks.list', 'stacks.create', 'layout.apply'] });
       return ok(String(message.id));
     });
-    const result = await probeBridge(api, UI_ID, true);
+    const result = await probeBridge(api, UI_ID);
     expect(result).toMatchObject({ ok: false, reason: 'unsupported', detail: expect.stringContaining('protocol 1') });
   });
 
@@ -142,7 +140,7 @@ describe('probeBridge', () => {
       if (message.action === 'bridge.capabilities') return ok(String(message.id), { protocol: BRIDGE.protocolVersion, versions: [1, 2], actions: ['bridge.ping', 'stacks.list'] });
       return ok(String(message.id));
     });
-    const result = await probeBridge(api, UI_ID, true);
+    const result = await probeBridge(api, UI_ID);
     expect(result).toMatchObject({ ok: false, reason: 'unsupported', detail: expect.stringContaining('layout.apply') });
   });
 
@@ -153,7 +151,7 @@ describe('probeBridge', () => {
       }
       return ok(String(message.id));
     });
-    const result = await probeBridge(api, UI_ID, true);
+    const result = await probeBridge(api, UI_ID);
     expect(result).toMatchObject({ ok: false, reason: 'unsupported', detail: expect.stringContaining('stacks.list') });
   });
 });
@@ -226,7 +224,7 @@ describe('applyLayout (via the port)', () => {
   }
 
   it('exposes bridge caps: visible stacks, untrusted native groups, stacked label', async () => {
-    const port = createBridgePort(happyApi().api, UI_ID, () => false, fakeTabs().api);
+    const port = createBridgePort(happyApi().api, UI_ID, fakeTabs().api);
     expect(port.id).toBe('vivaldi-bridge');
     expect(port.caps).toEqual({
       visibleGroups: true,
@@ -239,7 +237,7 @@ describe('applyLayout (via the port)', () => {
 
   it('falls back to an empty answer when stacks.list fails', async () => {
     const { api } = fakeApi((message) => errResp(String(message.id), 'UNSUPPORTED_API', 'gone'));
-    const port = createBridgePort(api, UI_ID, () => false, fakeTabs().api);
+    const port = createBridgePort(api, UI_ID, fakeTabs().api);
     await expect(port.listGroups(1)).resolves.toEqual([]);
   });
 
@@ -251,7 +249,7 @@ describe('applyLayout (via the port)', () => {
       { id: 3 },
       { id: 4 }, // plan B references 4 and 5; 5 is dead
     ]);
-    const port = createBridgePort(api, UI_ID, () => false, tabsApi);
+    const port = createBridgePort(api, UI_ID, tabsApi);
     const report = await port.apply(
       [
         { name: 'A', tabIds: [2, 3] },
@@ -271,7 +269,7 @@ describe('applyLayout (via the port)', () => {
   it('apply: a bridge failure fails the whole transactional plan', async () => {
     const { api } = happyApi({ layoutError: { code: 'BUSY', message: 'Another mutation is in flight' } });
     const { api: tabsApi } = fakeTabs([{ id: 1 }, { id: 2 }]);
-    const port = createBridgePort(api, UI_ID, () => false, tabsApi);
+    const port = createBridgePort(api, UI_ID, tabsApi);
     const report = await port.apply([{ name: 'A', tabIds: [1, 2] }], 1);
     expect(report).toMatchObject({ applied: 0, failed: 1 });
     expect(report.failures[0]).toContain('layout.apply failed');
@@ -281,7 +279,7 @@ describe('applyLayout (via the port)', () => {
   it('apply: no plans means no bridge traffic at all', async () => {
     const { api, calls } = happyApi();
     const { api: tabsApi } = fakeTabs();
-    const port = createBridgePort(api, UI_ID, () => false, tabsApi);
+    const port = createBridgePort(api, UI_ID, tabsApi);
     const report = await port.apply([], 1);
     expect(report.applied).toBe(0);
     expect(calls).toHaveLength(0);
@@ -301,22 +299,18 @@ describe('applyLayout (via the port)', () => {
       },
     };
     const { api: tabsApi } = fakeTabs([{ id: 1 }, { id: 2 }]);
-    const port = createBridgePort(api2, UI_ID, () => false, tabsApi);
+    const port = createBridgePort(api2, UI_ID, tabsApi);
     const report = await port.apply([{ name: 'A', tabIds: [1, 2] }], 1);
     expect(report).toMatchObject({ applied: 1, failed: 0 });
     expect(calls).toHaveLength(0);
   });
 
-  it('probe: the construction-time force callback bypasses the probe cache (forced stacks stays diagnosable)', async () => {
+  it('probe is memoized per cache lifetime (one ping across repeated probes)', async () => {
     const { api, calls } = happyApi();
-    let forced = false;
-    const port = createBridgePort(api, UI_ID, () => forced, fakeTabs().api);
+    const port = createBridgePort(api, UI_ID, fakeTabs().api);
     await port.probe();
     await port.probe(); // memoized: still one ping
     expect(calls.filter((c) => c.message.action === 'bridge.ping')).toHaveLength(1);
-    forced = true;
-    await port.probe();
-    expect(calls.filter((c) => c.message.action === 'bridge.ping')).toHaveLength(2);
   });
 });
 

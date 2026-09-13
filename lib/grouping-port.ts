@@ -6,7 +6,6 @@ import type {
   ApplyReport,
   EffectiveBackend,
   GroupInfo,
-  GroupingBackend,
   GroupPlan,
   PortCaps,
   PortId,
@@ -129,22 +128,13 @@ export function nativePort(tabs: NativeTabsApi, tabGroups: NativeTabGroupsApi): 
 // ---- Composition root ----
 
 /**
- * The only place transport policy lives. On Vivaldi the bridge is the sole runnable port: a
- * failed probe blocks the run exactly like a missing API key (recorded, options page opened by
- * the caller). A stale stored 'native' setting coerces to 'auto' instead of bricking the
- * extension; the options page greys the option out on Vivaldi so it cannot be set again.
- * Probe-force behavior is owned by the bridge port itself (construction-time callback), not here.
+ * The only place transport policy lives, and it is browser-driven, not configurable: on Vivaldi
+ * the bridge is the sole runnable port (a failed probe blocks the run exactly like a missing
+ * API key — recorded, options page opened by the caller); everywhere else the native port runs.
  */
-export async function selectPort(env: PortEnv, setting: GroupingBackend, ports: PortPair): Promise<PortDecision> {
+export async function selectPort(env: PortEnv, ports: PortPair): Promise<PortDecision> {
   if (!env.isVivaldi) {
-    if (setting === 'stacks') {
-      console.warn('[ai-tab-grouper] stacks backend requires the StackBridge mod (Vivaldi only); using native groups.');
-    }
     return { kind: 'ready', port: ports.native, backend: 'native' };
-  }
-
-  if (setting === 'native') {
-    console.warn('[ai-tab-grouper] native backend is not available on Vivaldi; using the StackBridge bridge.');
   }
 
   const probe = await ports.bridge.probe();

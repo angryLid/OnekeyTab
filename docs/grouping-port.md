@@ -60,23 +60,23 @@ Three rules give the interface its shape:
 
 ## Composition root
 
-`selectPort(env, setting, ports)` is the only place transport policy lives:
+`selectPort(env, ports)` is the only place transport policy lives, and the policy is
+browser-driven, not configurable (the old grouping-backend setting was removed — it never
+changed the outcome in any branch):
 
-| Setting | Chrome / Firefox | Vivaldi, bridge probe ok | Vivaldi, bridge probe failed |
-| --- | --- | --- | --- |
-| `auto` (default) | native | **vivaldi-bridge** | **blocked** — run ends like a missing API key |
-| `native` | native | coerced to `auto` (logged) — invisible groups are not shipped behavior on Vivaldi | blocked |
-| `stacks` | native + logged warning (kept for config compat) | vivaldi-bridge (probe forced, no cache) | blocked |
+| Browser | Bridge probe | Port |
+| --- | --- | --- |
+| Chrome / Chromium / Firefox / other non-Vivaldi | — (not probed) | **native** |
+| Vivaldi | ok | **vivaldi-bridge** |
+| Vivaldi | failed | **blocked** — run ends like a missing API key |
 
 The blocked path mirrors the no-API-key path exactly: the run is recorded with an `error`
 outcome and a reason, the badge stays clean, and the options page opens — where the StackBridge
-status line carries the warning text. Unconditional means unconditional: a stale stored
-`native` setting does not bypass the block; it coerces to `auto` (a dead setting value must not
-brick the extension, and the options page greys the option out on Vivaldi so it cannot be set
-again). A probe that fails with an immediate "receiving end does not exist" classifies as
-`no-listener` (mod absent or blocked at the manifest gate — the two are indistinguishable from
-outside); a probe that hangs classifies as `timeout` (mod present but silent). The warning text
-distinguishes the two so an installed-but-broken mod is not misreported as missing.
+status line carries the warning text. A probe that fails with an immediate "receiving end does
+not exist" classifies as `no-listener` (mod absent or blocked at the manifest gate — the two are
+indistinguishable from outside); a probe that hangs classifies as `timeout` (mod present but
+silent). The warning text distinguishes the two so an installed-but-broken mod is not
+misreported as missing.
 
 ## Why the vivExtData write path is gone
 

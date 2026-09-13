@@ -1,5 +1,6 @@
 import './style.css';
 import { browser } from 'wxt/browser';
+import { classifyBrowserBrand, UNIDENTIFIED_BROWSER } from '@/lib/browser-brand';
 import { getLastError, getConfig, updateConfig } from '@/lib/config';
 import { BRIDGE, DEDUPE, LOG, MODEL_ID_MAX, PROVIDERS, isValidModelId, resolveModel } from '@/lib/constants';
 import { verifyApiKey } from '@/lib/llm';
@@ -9,7 +10,7 @@ import { bridgeApi, DEFAULT_UI_EXTENSION_ID, probeBridge } from '@/lib/stackbrid
 import type { BridgeRuntime } from '@/lib/stackbridge';
 import { describeVivaldiSignals } from '@/lib/vivaldi';
 import { isDedupeRecord, isSelectionRecord, recordKind } from '@/lib/types';
-import type { AnyLogRecord, AuditTab, DedupeRecord, ExclusionReason, GroupingBackend, LogIndexEntry, LogKind, RunRecord, SelectionRecord } from '@/lib/types';
+import type { AnyLogRecord, AuditTab, DedupeRecord, ExclusionReason, LogIndexEntry, LogKind, RunRecord, SelectionRecord } from '@/lib/types';
 
 const input = document.querySelector<HTMLInputElement>('#api-key')!;
 const saveButton = document.querySelector<HTMLButtonElement>('#save')!;
@@ -24,12 +25,11 @@ const dedupeThresholdValue = document.querySelector<HTMLSpanElement>('#dedupe-th
 const dedupeIgnoreGrouped = document.querySelector<HTMLSelectElement>('#dedupe-ignore-grouped')!;
 const saveDedupeButton = document.querySelector<HTMLButtonElement>('#save-dedupe')!;
 const dedupeStatus = document.querySelector<HTMLParagraphElement>('#dedupe-status')!;
-const groupingBackend = document.querySelector<HTMLSelectElement>('#grouping-backend')!;
-const saveBackendButton = document.querySelector<HTMLButtonElement>('#save-backend')!;
-const backendStatus = document.querySelector<HTMLParagraphElement>('#backend-status')!;
 const errorSection = document.querySelector<HTMLElement>('#panel-settings-error')!;
 const lastError = document.querySelector<HTMLParagraphElement>('#last-error')!;
 const lastErrorTime = document.querySelector<HTMLParagraphElement>('#last-error-time')!;
+const groupingDescription = document.querySelector<HTMLParagraphElement>('#grouping-description')!;
+const bridgeStatus = document.querySelector<HTMLParagraphElement>('#bridge-status')!;
 
 // ---- Settings tab ----
 
@@ -38,36 +38,77 @@ function setStatus(message: string, kind: 'ok' | 'error' | 'muted'): void {
   status.className = kind;
 }
 
+type BridgeState = 'ok' | 'warn' | 'err';
+
+/** One colored status heading: dot + keyword + sentence; the class carries the color. */
+function setBridgeStatus(line: HTMLParagraphElement, state: BridgeState, message: string): void {
+  const keyword = state === 'ok' ? 'OK' : state === 'warn' ? 'WARN' : 'ERR';
+  line.textContent = `● ${keyword} — ${message}`;
+  line.className = state === 'warn' ? 'warning' : state;
+}
+
+/** Vivaldi mechanics explanation shared by both Vivaldi states; the status line carries the verdict. */
+const VIVALDI_DESCRIPTION =
+  'Vivaldi renders no native tab groups, so grouping writes real Tab Stacks through the StackBridge mod (Awesome-Vivaldi Bridge). Without a working mod the extension does not run on Vivaldi — a click opens this page, exactly like a missing API key.';
+
+/** Renders the Grouping section for one resolved situation: a state-specific description plus the colored status heading. */
+function renderGrouping(description: string, state: BridgeState, message: string): void {
+  groupingDescription.textContent = description;
+  setBridgeStatus(bridgeStatus, state, message);
+}
+
 /**
- * StackBridge status line: detect Vivaldi, ping the bridge, and reflect both in the UI.
- * On Vivaldi the native backend option is greyed out — invisible groups are not shipped
- * behavior there (docs/grouping-port.md), so offering the setting would be a trap.
+ * Resolves the situation this browser is in and renders the Grouping section for it: the title
+ * is a constant, the description and the colored status heading (● OK / ● WARN / ● ERR) are
+ * per-state. Color encodes usability: green = proven-native support, yellow = untested or works
+ * with caveats, red = unusable here.
  */
 async function refreshBridgeStatus(): Promise<void> {
-  const statusLine = document.querySelector<HTMLParagraphElement>('#bridge-status')!;
   try {
     const [tabs, windows] = await Promise.all([browser.tabs.query({}), browser.windows.getAll()]);
     const vivaldi = describeVivaldiSignals(tabs, navigator, windows);
     if (vivaldi.signals.length === 0) {
-      statusLine.textContent = 'Not Vivaldi — grouping uses native tab groups.';
+      const runtimeLike = browser.runtime as unknown as { getBrowserInfo?: () => Promise<{ name?: string }> };
+      const verdict = await classifyBrowserBrand({ nav: navigator, getBrowserInfo: runtimeLike.getBrowserInfo?.bind(runtimeLike) });
+      if (verdict.state === 'native') {
+        renderGrouping(
+          'This browser renders native tab groups, so grouping writes groups through the platform\'s own tab-group APIs. Nothing extra is needed.',
+          'ok',
+          `Native ${verdict.label} — fully supported in this browser.`,
+        );
+      } else if (verdict.label === UNIDENTIFIED_BROWSER) {
+        renderGrouping(
+          'This browser could not be identified. Grouping will use the platform\'s native tab-group APIs, but if it is a vendor fork, results are unverified.',
+          'warn',
+          `${UNIDENTIFIED_BROWSER} — never tested; grouping uses native tab groups and may have compatibility issues.`,
+        );
+      } else {
+        renderGrouping(
+          `${verdict.label} is not a browser this extension was tested on. Grouping still uses the platform\'s native tab-group APIs, but vendor forks often ship their own tab features, so results are unverified.`,
+          'warn',
+          `${verdict.label} detected — never tested; grouping uses native tab groups and may have compatibility issues.`,
+        );
+      }
       return;
     }
-    groupingBackend.querySelector<HTMLOptionElement>('option[value="native"]')!.disabled = true;
-    // Display coherence with the runtime coercion: a stored 'native' cannot run on Vivaldi.
-    if (groupingBackend.value === 'native') groupingBackend.value = 'auto';
+    // Vivaldi: the bridge is the only runnable transport, so the probe verdict is the whole story.
     const config = await getConfig();
     const extId = config?.bridge?.uiExtensionId?.trim() || DEFAULT_UI_EXTENSION_ID;
     const probe = await probeBridge(bridgeApi(browser.runtime as unknown as BridgeRuntime), extId);
     if (probe.ok) {
-      statusLine.textContent = 'StackBridge: detected. Grouping on Vivaldi creates real Tab Stacks.';
+      renderGrouping(VIVALDI_DESCRIPTION, 'warn', 'StackBridge detected — grouping creates real Tab Stacks via the mod (works, with caveats).');
     } else if (probe.reason === 'not-paired') {
       // Pairing, not installing, is the fix here — so no install-guide link.
-      statusLine.textContent = `StackBridge: ${describeProbeReason(probe)}.`;
+      renderGrouping(VIVALDI_DESCRIPTION, 'err', `${describeProbeReason(probe)}.`);
     } else {
-      statusLine.textContent = `StackBridge: ${describeProbeReason(probe)}. Clicks will not run until it works — install guide: ${BRIDGE.installDocsUrl}`;
+      renderGrouping(VIVALDI_DESCRIPTION, 'err', `${describeProbeReason(probe)}. Clicks will not run until it works — install guide: ${BRIDGE.installDocsUrl}`);
     }
   } catch (e) {
-    statusLine.textContent = `StackBridge status unknown: ${(e as Error).message}`;
+    renderGrouping(
+      'This browser could not be inspected. Grouping will use the platform\'s native tab-group APIs when clicked.',
+      'warn',
+      `Status unknown: ${(e as Error).message}`,
+    );
   }
 }
 
@@ -82,7 +123,6 @@ async function initSettings(): Promise<void> {
   dedupeThreshold.value = String(dedupe.threshold);
   dedupeIgnoreGrouped.value = dedupe.ignoreGrouped == null ? 'auto' : dedupe.ignoreGrouped ? 'always' : 'never';
   renderThresholdLabel();
-  groupingBackend.value = config?.groupingBackend ?? 'auto';
 
   const error = await getLastError();
   if (error) {
@@ -117,20 +157,6 @@ saveDedupeButton.addEventListener('click', async () => {
     dedupeStatus.className = 'error';
   } finally {
     saveDedupeButton.disabled = false;
-  }
-});
-
-saveBackendButton.addEventListener('click', async () => {
-  saveBackendButton.disabled = true;
-  try {
-    await updateConfig({ groupingBackend: groupingBackend.value as GroupingBackend });
-    backendStatus.textContent = 'Backend saved.';
-    backendStatus.className = 'ok';
-  } catch (e) {
-    backendStatus.textContent = `Save failed: ${(e as Error).message}`;
-    backendStatus.className = 'error';
-  } finally {
-    saveBackendButton.disabled = false;
   }
 });
 

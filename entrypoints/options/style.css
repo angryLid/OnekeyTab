@@ -107,6 +107,10 @@ button.muted-button:hover {
   color: #f87171;
 }
 
+.warning {
+  color: #fbbf24;
+}
+
 .muted {
   color: #9a9a9a;
 }
@@ -119,6 +123,11 @@ button.muted-button:hover {
 
   input {
     background-color: #ffffff;
+  }
+
+  /* Amber on white needs the darker tone to stay legible. */
+  .warning {
+    color: #b45309;
   }
 }
 

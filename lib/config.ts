@@ -11,8 +11,8 @@ export async function getConfig(): Promise<Config | null> {
   const res = await browser.storage.local.get(CONFIG_KEY);
   const raw = res[CONFIG_KEY] as Config | undefined;
   // Merge defaults so configs stored before a feature exists behave as if it were set up
-  // (dedupe enabled, grouping backend auto).
-  return raw ? { ...raw, dedupe: raw.dedupe ?? DEFAULT_DEDUPE, groupingBackend: raw.groupingBackend ?? 'auto' } : null;
+  // (dedupe enabled). Legacy groupingBackend values are simply ignored on read.
+  return raw ? { ...raw, dedupe: raw.dedupe ?? DEFAULT_DEDUPE } : null;
 }
 
 export async function setConfig(config: Config): Promise<void> {

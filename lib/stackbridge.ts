@@ -104,7 +104,7 @@ async function callBridge<T>(
   }
 }
 
-// ---- Probe (memoized per service-worker lifetime; forced when the stacks setting is explicit) ----
+// ---- Probe (memoized per service-worker lifetime) ----
 
 let probeMemo: PortProbeResult | null = null;
 
@@ -113,8 +113,8 @@ export function resetBridgeProbeCache(): void {
   probeMemo = null;
 }
 
-export async function probeBridge(api: BridgeApi, extId: string, force = false): Promise<PortProbeResult> {
-  if (!force && probeMemo) return probeMemo;
+export async function probeBridge(api: BridgeApi, extId: string): Promise<PortProbeResult> {
+  if (probeMemo) return probeMemo;
   probeMemo = await runProbe(api, extId);
   return probeMemo;
 }
@@ -237,12 +237,7 @@ export interface BridgeTabsApi {
   ungroup(tabIds: number[]): Promise<unknown>;
 }
 
-export function createBridgePort(
-  api: BridgeApi,
-  uiExtensionId: string,
-  forceProbe: () => boolean,
-  tabs: BridgeTabsApi,
-): GroupingPort {
+export function createBridgePort(api: BridgeApi, uiExtensionId: string, tabs: BridgeTabsApi): GroupingPort {
   const caps: PortCaps = {
     visibleGroups: true,
     nativeGroupsTrustworthy: false,
@@ -253,7 +248,7 @@ export function createBridgePort(
     id: 'vivaldi-bridge',
     caps,
     probe() {
-      return probeBridge(api, uiExtensionId, forceProbe());
+      return probeBridge(api, uiExtensionId);
     },
     async listGroups(windowId) {
       try {

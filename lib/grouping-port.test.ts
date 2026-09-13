@@ -26,25 +26,18 @@ function fakePort(id: PortId, probeResult: PortProbeResult = { ok: true }): Grou
 }
 
 describe('selectPort (composition root)', () => {
-  it('non-Vivaldi + auto: native, no probe traffic', async () => {
+  it('non-Vivaldi: native, no probe traffic', async () => {
     const native = fakePort('native');
     const bridge = fakePort('vivaldi-bridge');
-    const decision = await selectPort({ isVivaldi: false }, 'auto', { native, bridge });
+    const decision = await selectPort({ isVivaldi: false }, { native, bridge });
     expect(decision).toMatchObject({ kind: 'ready', backend: 'native' });
     if (decision.kind === 'ready') expect(decision.port).toBe(native);
     expect(bridge.probe).not.toHaveBeenCalled();
   });
 
-  it('non-Vivaldi + forced stacks: native with a warning (config-compat matrix)', async () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const decision = await selectPort({ isVivaldi: false }, 'stacks', { native: fakePort('native'), bridge: fakePort('vivaldi-bridge') });
-    expect(decision).toMatchObject({ kind: 'ready', backend: 'native' });
-    expect(warn).toHaveBeenCalledWith(expect.stringContaining('StackBridge'));
-  });
-
   it('Vivaldi + healthy bridge: the bridge port wins with a recorded probe', async () => {
     const bridge = fakePort('vivaldi-bridge');
-    const decision = await selectPort({ isVivaldi: true }, 'auto', { native: fakePort('native'), bridge });
+    const decision = await selectPort({ isVivaldi: true }, { native: fakePort('native'), bridge });
     expect(decision.kind).toBe('ready');
     if (decision.kind === 'ready') {
       expect(decision.port).toBe(bridge);
@@ -57,27 +50,11 @@ describe('selectPort (composition root)', () => {
 
   it('Vivaldi + unreachable bridge: blocked with a reason naming the mod', async () => {
     const bridge = fakePort('vivaldi-bridge', { ok: false, reason: 'no-listener' });
-    const decision = await selectPort({ isVivaldi: true }, 'auto', { native: fakePort('native'), bridge });
+    const decision = await selectPort({ isVivaldi: true }, { native: fakePort('native'), bridge });
     expect(decision.kind).toBe('blocked');
     if (decision.kind === 'blocked') {
       expect(decision.reason).toContain('StackBridge mod not detected');
       expect(decision.probe).toMatchObject({ ok: false, reason: 'no-listener' });
-    }
-  });
-
-  it('Vivaldi + stored native setting: coerced to the bridge (invisible groups are not shipped there)', async () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const bridge = fakePort('vivaldi-bridge');
-    const decision = await selectPort({ isVivaldi: true }, 'native', { native: fakePort('native'), bridge });
-    expect(decision).toMatchObject({ kind: 'ready', backend: 'stacks' });
-    expect(warn).toHaveBeenCalledWith(expect.stringContaining('not available on Vivaldi'));
-  });
-
-  it('auto and forced stacks behave identically at the composition root; force lives in the port', async () => {
-    for (const setting of ['auto', 'stacks'] as const) {
-      const bridge = fakePort('vivaldi-bridge');
-      const decision = await selectPort({ isVivaldi: true }, setting, { native: fakePort('native'), bridge });
-      expect(decision).toMatchObject({ kind: 'ready', backend: 'stacks' });
     }
   });
 });

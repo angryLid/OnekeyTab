@@ -46,23 +46,10 @@
           <p id="model-status" role="status"></p>
         </section>
 
-        <section id="panel-settings-stacks" data-panel="settings">
-          <h2>Vivaldi grouping (StackBridge)</h2>
-          <p class="muted">
-            On Vivaldi, grouping creates real Tab Stacks through the StackBridge mod
-            (Awesome-Vivaldi Bridge). Without the mod the extension does not run on Vivaldi — a
-            click opens this page, exactly like a missing API key. Native tab groups are
-            unavailable on Vivaldi (they render nowhere there).
-          </p>
-          <p id="bridge-status" class="muted">Checking StackBridge…</p>
-          <label for="grouping-backend">Grouping backend</label>
-          <select id="grouping-backend">
-            <option value="auto">Auto — stacks via StackBridge on Vivaldi</option>
-            <option value="native">Native tab groups (Chrome/Firefox only)</option>
-            <option value="stacks">Always require StackBridge on Vivaldi</option>
-          </select>
-          <button id="save-backend" type="button">Save backend</button>
-          <p id="backend-status" role="status"></p>
+        <section id="panel-settings-grouping" data-panel="settings">
+          <h2>Grouping</h2>
+          <p id="grouping-description" class="muted">Determining which grouping backend this browser supports…</p>
+          <p id="bridge-status" class="muted">Checking…</p>
         </section>
 
         <section id="panel-settings-dedupe" data-panel="settings">
