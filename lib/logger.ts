@@ -10,7 +10,7 @@ export type { AnyLogRecord } from './types';
  * Developer-facing logs (three record kinds: `run`, `selection`, and `dedupe`).
  *
  * Layout: one lightweight index key plus one payload key per record
- * (`ai-tab-grouper:run:<id>`, shared by all kinds — ids are unique). The
+ * (`onekey-tab:run:<id>`, shared by all kinds — ids are unique). The
  * index keeps a small projection (including each record's byte size) so the
  * log list page never loads full payloads; a single record is read on demand
  * when its details are opened. Stored size is capped (`LOG.maxTotalBytes`,

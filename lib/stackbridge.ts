@@ -255,7 +255,7 @@ export function createBridgePort(api: BridgeApi, uiExtensionId: string, tabs: Br
         return await listStacks(api, uiExtensionId, windowId);
       } catch (e) {
         // A failed read must never crash the run: an empty answer excludes nothing, the same as a window with no stacks.
-        console.warn('[ai-tab-grouper] stacks.list failed; treating window as unstacked:', (e as Error).message);
+        console.warn('[onekey-tab] stacks.list failed; treating window as unstacked:', (e as Error).message);
         return [];
       }
     },

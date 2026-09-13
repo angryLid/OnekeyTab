@@ -1,4 +1,4 @@
-# AI Tab Grouper
+# Onekey Tab
 
 A Chrome/Firefox extension (built with [WXT](https://wxt.dev)) that groups your open tabs with AI,
 after an optional local dedupe pass closes near-duplicate tabs first.

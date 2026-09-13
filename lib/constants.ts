@@ -16,12 +16,12 @@ export const PROVIDERS: Record<ProviderId, Provider> = {
     baseUrl: 'https://openrouter.ai/api/v1',
     chatPath: '/chat/completions',
     model: 'google/gemini-3.5-flash-lite',
-    extraHeaders: { 'X-Title': 'AI Tab Grouper' },
+    extraHeaders: { 'X-Title': 'Onekey Tab' },
   },
 };
 
 /** Console prefix shared by every module that logs. */
-export const LOG_PREFIX = '[ai-tab-grouper]';
+export const LOG_PREFIX = '[onekey-tab]';
 
 export const LIMITS = {
   maxTabs: 50,
@@ -109,11 +109,11 @@ export const BADGE_COLORS = {
 } as const;
 
 export const LOG = {
-  indexKey: 'ai-tab-grouper:logIndex',
+  indexKey: 'onekey-tab:logIndex',
   /** Upper cap on stored run logs, well inside Chrome's default 10MB storage.local quota. */
   maxTotalBytes: 5 * 1024 * 1024,
   /** How many recent records the UI renders / exports by default. */
   listWindow: 100,
   /** Prefix for per-run payload keys. */
-  runKeyPrefix: 'ai-tab-grouper:run:',
+  runKeyPrefix: 'onekey-tab:run:',
 } as const;

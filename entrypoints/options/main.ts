@@ -549,7 +549,7 @@ function download(filename: string, text: string): void {
 
 async function exportRecords(records: AnyLogRecord[]): Promise<void> {
   const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-  download(`ai-tab-grouper-logs-${stamp}.json`, JSON.stringify(records, null, 2));
+  download(`onekey-tab-logs-${stamp}.json`, JSON.stringify(records, null, 2));
 }
 
 document.querySelector<HTMLButtonElement>('#export-all')!.addEventListener('click', async () => {

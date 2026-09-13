@@ -3,7 +3,7 @@ import { defineConfig } from 'wxt';
 // See https://wxt.dev/api/config.html
 export default defineConfig({
   manifest: {
-    name: 'AI Tab Grouper',
+    name: 'Onekey Tab',
     description: 'Group your open tabs with AI. Click the icon, get organized tabs.',
     permissions: ['tabs', 'tabGroups', 'storage'],
     host_permissions: ['https://openrouter.ai/*'],

@@ -2,8 +2,8 @@ import { browser } from 'wxt/browser';
 import { DEDUPE } from './constants';
 import type { Config, DedupeConfig, LastError } from './types';
 
-const CONFIG_KEY = 'ai-tab-grouper:config';
-const LAST_ERROR_KEY = 'ai-tab-grouper:lastError';
+const CONFIG_KEY = 'onekey-tab:config';
+const LAST_ERROR_KEY = 'onekey-tab:lastError';
 
 const DEFAULT_DEDUPE: DedupeConfig = { enabled: true, threshold: DEDUPE.threshold };
 
