@@ -1,5 +1,5 @@
 {
-  "name": "wxt-starter",
+  "name": "onekey-tab",
   "description": "manifest.json description",
   "private": true,
   "version": "0.13.0",
@@ -13,6 +13,7 @@
     "zip:firefox": "wxt zip -b firefox",
     "compile": "tsc --noEmit",
     "test": "vitest run",
+    "release": "pnpm version --message \"chore(release): v%s\"",
     "postinstall": "wxt prepare"
   },
   "devDependencies": {
