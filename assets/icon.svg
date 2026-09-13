@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+  <!-- OnekeyTab: scattered tabs collapsing into one keycap; the engraved star is the AI inside the key -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#4F46E5"/>
+      <stop offset="1" stop-color="#9333EA"/>
+    </linearGradient>
+  </defs>
+  <rect width="128" height="128" rx="28" fill="url(#bg)"/>
+  <!-- back tabs, fading as they cascade outward -->
+  <rect x="12" y="26" width="78" height="50" rx="12" fill="#ffffff" opacity="0.3"/>
+  <rect x="23" y="40" width="78" height="50" rx="12" fill="#ffffff" opacity="0.55"/>
+  <!-- front card as a keycap: base lip + raised top surface -->
+  <rect x="34" y="54" width="78" height="50" rx="12" fill="#A5B4FC"/>
+  <rect x="34" y="48" width="78" height="50" rx="12" fill="#ffffff"/>
+  <!-- engraved AI star on the key -->
+  <path d="M73 54L80 66L92 73L80 80L73 92L66 80L54 73L66 66Z" fill="#F59E0B"/>
+</svg>
