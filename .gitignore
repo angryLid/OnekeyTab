@@ -14,10 +14,11 @@ stats-*.json
 .wxt
 web-ext.config.ts
 
-# Coding agent session state
+# Coding agent session state (project skills are assets and stay tracked)
 .commandcode/
 .dsh/
-.pi/
+.pi/*
+!.pi/skills/
 .pi-web/
 
 # Editor directories and files
