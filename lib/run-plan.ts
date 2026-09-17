@@ -1,11 +1,11 @@
 // Wxt-free: the chat transport is injected, so the call+parse+retry contract tests without a browser.
 import { LOG_PREFIX } from './constants';
 import { parsePlan } from './parse-groups';
-import { buildMessages, buildRetryMessages } from './prompt';
-import type { ChatMessage, ChatResult, GroupPlan, ModelTab, RunCall } from './types';
+import { GROUPING_SCHEMA, buildMessages, buildRetryMessages } from './prompt';
+import type { ChatMessage, ChatResult, GroupPlan, ModelTab, ResponseSchemaSpec, RunCall } from './types';
 
 /** The slice of the LLM client requestPlan needs; structural so tests inject fakes. */
-export type ChatFn = (apiKey: string, opts: { messages: ChatMessage[]; model?: string }) => Promise<ChatResult>;
+export type ChatFn = (apiKey: string, opts: { messages: ChatMessage[]; model?: string; responseSchema?: ResponseSchemaSpec }) => Promise<ChatResult>;
 
 export interface PlanOutcome {
   plans: GroupPlan[];
@@ -18,6 +18,7 @@ export interface PlanOutcome {
  * plan retry once with the errors fed back, then parse again. `calls` is caller-owned and filled
  * progressively so the composition root can persist completed calls even when a later call throws.
  * Throws when the model returns an invalid plan twice; partial errors on a usable plan are returned, never thrown.
+ * `policy` is the user prompt segment (a prefill or custom text); absent/blank omits the turn.
  */
 export async function requestPlan(
   chat: ChatFn,
@@ -25,12 +26,13 @@ export async function requestPlan(
   candidates: ModelTab[],
   calls: RunCall[],
   model?: string,
+  policy?: string,
 ): Promise<PlanOutcome> {
-  const messages = buildMessages(candidates);
+  const messages = buildMessages(candidates, policy);
   const validIds = new Set(candidates.map((tab) => tab.id));
 
   const firstStartedAt = Date.now();
-  const first = await chat(apiKey, { messages, model });
+  const first = await chat(apiKey, { messages, model, responseSchema: GROUPING_SCHEMA });
   calls.push({
     ts: firstStartedAt,
     durationMs: Date.now() - firstStartedAt,
@@ -48,7 +50,7 @@ export async function requestPlan(
     calls[0]!.parseError = errors.join('; ');
     const retryMessages = buildRetryMessages(messages, first.content, errors);
     const retryStartedAt = Date.now();
-    const retry = await chat(apiKey, { messages: retryMessages, model });
+    const retry = await chat(apiKey, { messages: retryMessages, model, responseSchema: GROUPING_SCHEMA });
     calls.push({
       ts: retryStartedAt,
       durationMs: Date.now() - retryStartedAt,

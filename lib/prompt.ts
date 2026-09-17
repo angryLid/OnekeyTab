@@ -1,22 +1,49 @@
-import { LIMITS } from './constants';
-import type { ChatMessage, ModelTab } from './types';
+import type { ChatMessage, ModelTab, ResponseSchemaSpec } from './types';
 
-export const SYSTEM_PROMPT = `You organize browser tabs into groups. You receive a JSON array of open tabs, each with an "id" (number), a "title" (string), and a "url" (string). Group tabs that clearly share a topic, such as the same website, the same project, or the same task.
-
+/**
+ * Thin fixed system prompt: the role statement plus the output contract only. All grouping
+ * policy lives in the user prompt segment (a prefill or custom text), so the contract below
+ * doubles as the instruction set when the API-level schema is unavailable (see llm.ts fallback).
+ */
+export const SYSTEM_PROMPT = `You organize open browser tabs into groups, based on each tab's title and URL.
 Rules:
-- Output ONLY valid JSON. No markdown fences, no commentary, no explanation.
+- Output ONLY valid JSON. No markdown fences, no commentary.
 - Schema: {"groups": [{"name": string, "tabIds": number[]}]}
 - Use only ids from the input. Each id may appear in at most one group.
-- Only group tabs that belong together. Leave unrelated tabs out. Never create catch-all groups like "Other" or "Misc".
-- Group names must be in the same language as the tab titles, at most ${LIMITS.nameMax} characters.
-- Only create groups containing 2 or more tabs. Typically produce 2 to 8 groups.
-- If nothing groups naturally, return {"groups": []}.`;
+- Never create catch-all groups like "Other" or "Misc".`;
 
-export function buildMessages(candidates: ModelTab[]): ChatMessage[] {
-  return [
-    { role: 'system', content: SYSTEM_PROMPT },
-    { role: 'user', content: JSON.stringify(candidates) },
-  ];
+/** The plan shape as a strict structured-output spec, sent as response_format where supported. */
+export const GROUPING_SCHEMA: ResponseSchemaSpec = {
+  name: 'grouping_plan',
+  schema: {
+    type: 'object',
+    properties: {
+      groups: {
+        type: 'array',
+        items: {
+          type: 'object',
+          properties: {
+            name: { type: 'string' },
+            tabIds: { type: 'array', items: { type: 'integer' } },
+          },
+          required: ['name', 'tabIds'],
+          additionalProperties: false,
+        },
+      },
+    },
+    required: ['groups'],
+    additionalProperties: false,
+  },
+};
+
+export function buildMessages(candidates: ModelTab[], policy?: string): ChatMessage[] {
+  const messages: ChatMessage[] = [{ role: 'system', content: SYSTEM_PROMPT }];
+  // The policy is its own user turn ahead of the tab payload, so the fixed contract and the
+  // editable policy stay separately visible in the run logs.
+  const trimmedPolicy = policy?.trim();
+  if (trimmedPolicy) messages.push({ role: 'user', content: trimmedPolicy });
+  messages.push({ role: 'user', content: JSON.stringify(candidates) });
+  return messages;
 }
 
 export function buildRetryMessages(previous: ChatMessage[], rawResponse: string, errors: string[]): ChatMessage[] {

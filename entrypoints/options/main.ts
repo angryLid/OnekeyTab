@@ -2,7 +2,7 @@ import './style.css';
 import { browser } from 'wxt/browser';
 import { classifyBrowserBrand, UNIDENTIFIED_BROWSER } from '@/lib/browser-brand';
 import { getLastError, getConfig, updateConfig } from '@/lib/config';
-import { BRIDGE, DEDUPE, LOG, MODEL_ID_MAX, PROVIDERS, isValidModelId, resolveModel } from '@/lib/constants';
+import { BUILT_IN_PREFILLS, BRIDGE, DEDUPE, LIMITS, LOG, MODEL_ID_MAX, PROMPT_MAX, PROVIDERS, findPrefill, isValidModelId, resolveModel } from '@/lib/constants';
 import { verifyApiKey } from '@/lib/llm';
 import { clearLog, countRecords, getRecord, listRecent } from '@/lib/logger';
 import { describeProbeReason } from '@/lib/grouping-port';
@@ -15,6 +15,12 @@ import type { AnyLogRecord, AuditTab, DedupeRecord, ExclusionReason, LogIndexEnt
 const input = document.querySelector<HTMLInputElement>('#api-key')!;
 const saveButton = document.querySelector<HTMLButtonElement>('#save')!;
 const status = document.querySelector<HTMLParagraphElement>('#status')!;
+const prefillSelect = document.querySelector<HTMLSelectElement>('#prompt-prefill')!;
+const promptText = document.querySelector<HTMLTextAreaElement>('#prompt-text')!;
+const savePromptButton = document.querySelector<HTMLButtonElement>('#save-prompt')!;
+const resetPromptButton = document.querySelector<HTMLButtonElement>('#reset-prompt')!;
+const promptStatus = document.querySelector<HTMLParagraphElement>('#prompt-status')!;
+const promptEmptyWarning = document.querySelector<HTMLParagraphElement>('#prompt-empty-warning')!;
 const modelInput = document.querySelector<HTMLInputElement>('#model-id')!;
 const saveModelButton = document.querySelector<HTMLButtonElement>('#save-model')!;
 const resetModelButton = document.querySelector<HTMLButtonElement>('#reset-model')!;
@@ -118,6 +124,19 @@ async function initSettings(): Promise<void> {
   modelInput.value = config?.model ?? '';
   modelInput.placeholder = PROVIDERS.openrouter.model;
   modelInput.maxLength = MODEL_ID_MAX;
+  for (const prefill of BUILT_IN_PREFILLS) {
+    const option = document.createElement('option');
+    option.value = prefill.id;
+    option.textContent = prefill.label;
+    prefillSelect.appendChild(option);
+  }
+  promptText.value = config?.prompt ?? '';
+  promptText.maxLength = PROMPT_MAX;
+  // A stored id that no longer exists in this build falls back to Custom instead of breaking.
+  const storedPrefill = findPrefill(config?.prefillId);
+  prefillSelect.value = storedPrefill?.id ?? '';
+  resetPromptButton.hidden = !storedPrefill;
+  refreshPromptWarning();
   const dedupe = config?.dedupe ?? { enabled: true, threshold: DEDUPE.threshold };
   dedupeEnabled.checked = dedupe.enabled;
   dedupeThreshold.value = String(dedupe.threshold);
@@ -177,6 +196,70 @@ saveButton.addEventListener('click', async () => {
     setStatus(`Verification failed: ${(e as Error).message}`, 'error');
   } finally {
     saveButton.disabled = false;
+  }
+});
+
+// ---- Grouping prompt ----
+
+function setPromptStatus(message: string, kind: 'ok' | 'error' | 'muted'): void {
+  promptStatus.textContent = message;
+  promptStatus.className = kind;
+}
+
+function refreshPromptWarning(): void {
+  promptEmptyWarning.hidden = promptText.value.trim().length > 0;
+}
+
+promptText.addEventListener('input', refreshPromptWarning);
+
+prefillSelect.addEventListener('change', () => {
+  const prefill = findPrefill(prefillSelect.value);
+  resetPromptButton.hidden = !prefill;
+  if (!prefill) {
+    setPromptStatus('Custom policy — write your own text, then Save.', 'muted');
+    return;
+  }
+  promptText.value = prefill.text;
+  refreshPromptWarning();
+  setPromptStatus(`Prefill "${prefill.label}" inserted — review and Save.`, 'muted');
+});
+
+savePromptButton.addEventListener('click', async () => {
+  const text = promptText.value.trim();
+  if (!text) {
+    setPromptStatus('Empty policy blocks every run — pick a prefill or write your own.', 'error');
+    return;
+  }
+  savePromptButton.disabled = true;
+  try {
+    // Provenance is content-derived: edited text loses the prefill id, so a future built-in
+    // update only reaches users whose text still matches verbatim.
+    const match = BUILT_IN_PREFILLS.find((prefill) => prefill.text === text);
+    await updateConfig({ prompt: text, prefillId: match?.id });
+    prefillSelect.value = match?.id ?? '';
+    resetPromptButton.hidden = !match;
+    refreshPromptWarning();
+    setPromptStatus(match ? `Policy saved — using prefill "${match.label}".` : 'Custom policy saved.', 'ok');
+  } catch (e) {
+    setPromptStatus(`Save failed: ${(e as Error).message}`, 'error');
+  } finally {
+    savePromptButton.disabled = false;
+  }
+});
+
+resetPromptButton.addEventListener('click', async () => {
+  const prefill = findPrefill(prefillSelect.value);
+  if (!prefill) return;
+  resetPromptButton.disabled = true;
+  try {
+    await updateConfig({ prompt: prefill.text, prefillId: prefill.id });
+    promptText.value = prefill.text;
+    refreshPromptWarning();
+    setPromptStatus(`Restored prefill "${prefill.label}".`, 'ok');
+  } catch (e) {
+    setPromptStatus(`Reset failed: ${(e as Error).message}`, 'error');
+  } finally {
+    resetPromptButton.disabled = false;
   }
 });
 
@@ -483,7 +566,7 @@ const REASON_LABELS: Record<ExclusionReason, string> = {
   grouped: 'already grouped',
   'no-url': 'no url',
   'internal-url': 'internal url',
-  'over-cap': 'beyond 50-tab cap',
+  'over-cap': `beyond ${LIMITS.maxTabs}-tab cap`,
 };
 
 function reasonLabel(tab: AuditTab): string {

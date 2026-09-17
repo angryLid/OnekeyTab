@@ -59,11 +59,11 @@ describe('selectCandidates (happy path)', () => {
     expect(selectCandidates(tabs).map((t) => t.id)).toEqual([2, 3, 1]);
   });
 
-  it('caps the result at 50 tabs', () => {
-    const tabs = Array.from({ length: 60 }, (_, i) => tab({ id: i + 1, lastAccessed: i }));
+  it('caps the result at maxTabs tabs', () => {
+    const tabs = Array.from({ length: LIMITS.maxTabs + 10 }, (_, i) => tab({ id: i + 1, lastAccessed: i }));
     const result = selectCandidates(tabs);
-    expect(result).toHaveLength(50);
-    expect(result[0]?.id).toBe(60);
+    expect(result).toHaveLength(LIMITS.maxTabs);
+    expect(result[0]?.id).toBe(LIMITS.maxTabs + 10);
   });
 });
 

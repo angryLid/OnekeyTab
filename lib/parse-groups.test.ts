@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { LIMITS } from './constants';
 import { parsePlan } from './parse-groups';
 
 const validIds = new Set([1, 2, 3, 4, 5, 6]);
@@ -74,10 +75,10 @@ describe('parsePlan (happy path)', () => {
     expect(errors).toEqual([]);
   });
 
-  it('truncates names to 24 characters', () => {
+  it('truncates names to nameMax characters', () => {
     const raw = JSON.stringify({ groups: [{ name: 'x'.repeat(50), tabIds: [1, 2] }] });
     const { plans } = parsePlan(raw, validIds);
-    expect(plans[0]?.name).toHaveLength(24);
+    expect(plans[0]?.name).toHaveLength(LIMITS.nameMax);
   });
 
   it('reports invalid JSON as errors', () => {

@@ -25,5 +25,6 @@ or `.output/chrome-mv3` (Option B).
 ## Set the API key
 
 Click the extension icon — the settings page opens. Paste an
-[OpenRouter API key](https://openrouter.ai/settings/keys) and click **Save & Verify**. Done —
+[OpenRouter API key](https://openrouter.ai/settings/keys) and click **Save & Verify**. Then pick
+a grouping prefill under **Grouping prompt** (or write your own policy) and save. Done —
 click the icon again on any window to group its tabs.

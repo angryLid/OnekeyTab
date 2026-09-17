@@ -60,7 +60,9 @@ label {
   margin-bottom: 0.5rem;
 }
 
-input {
+input,
+textarea,
+select {
   width: 100%;
   max-width: 420px;
   box-sizing: border-box;
@@ -70,6 +72,13 @@ input {
   border-radius: 6px;
   background-color: #1a1a1a;
   color: inherit;
+}
+
+textarea {
+  max-width: 640px;
+  resize: vertical;
+  font-family: inherit;
+  line-height: 1.45;
 }
 
 button {
@@ -121,7 +130,9 @@ button.muted-button:hover {
     background-color: #ffffff;
   }
 
-  input {
+  input,
+  textarea,
+  select {
     background-color: #ffffff;
   }
 

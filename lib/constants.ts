@@ -24,10 +24,10 @@ export const PROVIDERS: Record<ProviderId, Provider> = {
 export const LOG_PREFIX = '[onekey-tab]';
 
 export const LIMITS = {
-  maxTabs: 50,
+  maxTabs: 100,
   minCandidates: 3,
   titleMax: 200,
-  nameMax: 24,
+  nameMax: 32,
   timeoutMs: 30_000,
   maxTokens: 4000,
   temperature: 0.2,
@@ -46,6 +46,47 @@ export function resolveModel(configured?: string): string {
 /** True when the string is shaped like a model id (no whitespace, within the length cap). */
 export function isValidModelId(value: string): boolean {
   return value.length > 0 && value.length <= MODEL_ID_MAX && !/\s/.test(value);
+}
+
+/** Longest accepted grouping policy text; generous for a policy, well inside any context window. */
+export const PROMPT_MAX = 2000;
+
+/** A built-in grouping policy the user can start from; the fixed system prompt never carries policy. */
+export interface Prefill {
+  id: string;
+  label: string;
+  text: string;
+}
+
+/**
+ * Built-in grouping policies. The fixed system prompt only states the role and the output
+ * contract, so each prefill owns the whole "how to group" strategy and must be self-contained.
+ */
+export const BUILT_IN_PREFILLS: Prefill[] = [
+  {
+    id: 'task-centric',
+    label: 'Task-centric — tickets & MRs',
+    text: [
+      'You decide how the tabs are grouped. Goal: one group per work task, not per website.',
+      '',
+      'Tab URLs keep their paths; use them:',
+      '- Work-item keys look like ABC-123 (project code, dash, number). Find them in URL paths (e.g. /browse/ABC-123) and in titles. They can live on any domain — never rely on the domain name.',
+      '- GitLab-style pages carry a project path plus an artifact: /owner/project/-/merge_requests/42, /-/issues/42, /-/pipelines. MR and branch titles often quote the work-item key (e.g. "ABC-123 fix login").',
+      '',
+      'Procedure:',
+      '1. Find every work-item key across all tabs. All tabs sharing one key — tickets, MRs, issues, diffs, pipelines — form one group, regardless of site.',
+      '2. A keyless tab that clearly belongs to a project with a keyed group (repo pages, boards, backlog, MR lists) joins that group.',
+      '3. Match a keyless project to a key only when the correspondence is evident (project name ≈ key prefix, or the key appears in titles). When unsure, keep them separate — a wrong merge is worse than a missed merge.',
+      '4. Tabs with no task or project affinity stay ungrouped. Never create catch-all groups.',
+      '',
+      'Names: prefer "KEY-123 short-topic" in the ticket\'s own language, under 30 characters, same language as the tab titles; without a key, use the project name. A group needs at least 2 tabs; leave smaller clusters out. Create as many groups as there are real tasks — expect more groups when many tickets are open.',
+    ].join('\n'),
+  },
+];
+
+/** Look up a built-in prefill by id; unknown ids (removed from a later build) resolve to nothing. */
+export function findPrefill(id?: string): Prefill | undefined {
+  return BUILT_IN_PREFILLS.find((prefill) => prefill.id === id);
 }
 
 /**

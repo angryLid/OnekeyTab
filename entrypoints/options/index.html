@@ -32,6 +32,26 @@
           <p id="status" role="status"></p>
         </section>
 
+        <section id="panel-settings-prompt" data-panel="settings">
+          <h2>Grouping prompt</h2>
+          <p class="muted">
+            The fixed part of the prompt only tells the model to output group JSON. This policy
+            text decides <em>how</em> tabs are grouped and is fully yours. Pick a built-in prefill
+            to start, then edit freely — saving edited text marks the policy as custom. An empty
+            policy blocks every run: clicking the toolbar icon reopens this page.
+          </p>
+          <label for="prompt-prefill">Prefill</label>
+          <select id="prompt-prefill">
+            <option value="">Custom — write your own</option>
+          </select>
+          <label for="prompt-text">Policy text</label>
+          <textarea id="prompt-text" rows="14" spellcheck="false"></textarea>
+          <p id="prompt-empty-warning" class="warning" hidden>No policy set — grouping is blocked until you pick a prefill or write one below.</p>
+          <button id="save-prompt" type="button">Save policy</button>
+          <button id="reset-prompt" type="button" class="muted-button" hidden>Restore selected prefill</button>
+          <p id="prompt-status" role="status"></p>
+        </section>
+
         <section id="panel-settings-model" data-panel="settings">
           <h2>Model</h2>
           <p class="muted">
@@ -89,7 +109,8 @@
           <h2>Privacy</h2>
           <p>
             When you click the toolbar icon, tab titles and URLs (origin and path only — no query
-            parameters) are sent to OpenRouter for grouping. OpenRouter does not log prompts or
+            parameters) are sent to OpenRouter for grouping, together with your grouping policy
+            text from the Grouping prompt section. OpenRouter does not log prompts or
             completions by default. The developer logs are stored locally in this browser and never
             uploaded; they may contain tab titles and URLs you grouped, plus titles and URLs of all
             tabs read while selecting candidates. Dedupe logs additionally store the <strong>full

@@ -13,7 +13,7 @@ the newest tab of each near-duplicate family survive into grouping.
 - Toggle: settings page, default **on**.
 - Threshold: settings slider, 0.50–0.95 step 0.05, default **0.75**.
 - Scope: current window only; eligibility = the grouping selection rules (not pinned, not
-  grouped, not browser-internal, has id and URL) **without** the 50-tab cap (the cap applies
+  grouped, not browser-internal, has id and URL) **without** the maxTabs cap (the cap applies
   later, to what is sent to the model).
 
 ## Scoring model
@@ -84,7 +84,7 @@ comparison — O(n²) comparison records would burn the 5 MB log cap.
    before closing anything** (crash mid-close stays diagnosable) → `tabs.remove(closedIds)` in
    one call → re-query the window → backfill per-tab `outcome` (`removed` / `declined`) and
    `closedCount`.
-3. Existing selection audit runs on the (possibly reduced) tab list; the 50 cap and the
+3. Existing selection audit runs on the (possibly reduced) tab list; the maxTabs cap and the
    `< 3 candidates` skip logic apply here. Dedupe still logs even when grouping then skips.
 4. LLM → groups as before. The run record links `dedupeId`; the dedupe record links `runId`.
 

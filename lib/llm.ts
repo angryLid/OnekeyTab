@@ -1,5 +1,5 @@
 import { LIMITS, PROVIDERS, isValidModelId, resolveModel } from './constants';
-import type { ChatMessage, ChatResult } from './types';
+import type { ChatMessage, ChatResult, ResponseSchemaSpec } from './types';
 
 export interface CompletionOptions {
   messages: ChatMessage[];
@@ -7,6 +7,8 @@ export interface CompletionOptions {
   timeoutMs?: number;
   /** Model id override; absent/empty falls back to the built-in provider default. */
   model?: string;
+  /** Structured-output spec; when set, the request carries response_format json_schema and require_parameters routing. */
+  responseSchema?: ResponseSchemaSpec;
 }
 
 /**
@@ -22,13 +24,22 @@ export interface CompletionOptions {
 const PROVIDER = PROVIDERS.openrouter;
 
 let reasoningParamUnsupported = false;
+let structuredOutputUnsupported = false;
 
-/** Test hook: the endpoint quirk memory must not leak between test cases or builds. */
+/** Test hook: the endpoint quirk memories must not leak between test cases or builds. */
 export function resetReasoningParamSupport(): void {
   reasoningParamUnsupported = false;
 }
 
-function buildBody(opts: CompletionOptions, includeReasoning: boolean): Record<string, unknown> {
+/** Test hook: resets the structured-output fallback memory set by a rejecting endpoint. */
+export function resetStructuredOutputSupport(): void {
+  structuredOutputUnsupported = false;
+}
+
+/** Error signatures that mean "this model/endpoint cannot do response_format json_schema"; a plain retry is the answer. */
+const STRUCTURED_UNSUPPORTED_RE = /response_format|json_schema|structured|no allowed providers|no providers/i;
+
+function buildBody(opts: CompletionOptions, includeReasoning: boolean, includeStructured: boolean): Record<string, unknown> {
   // resolveModel also guards against a whitespace/oversized id slipping into a request.
   const model = isValidModelId(resolveModel(opts.model)) ? resolveModel(opts.model) : PROVIDER.model;
   const body: Record<string, unknown> = {
@@ -36,16 +47,25 @@ function buildBody(opts: CompletionOptions, includeReasoning: boolean): Record<s
     messages: opts.messages,
     temperature: LIMITS.temperature,
     max_tokens: opts.maxTokens ?? LIMITS.maxTokens,
-    provider: { sort: 'throughput' },
+    // require_parameters keeps the schema meaningful: routing only picks endpoints that honor response_format.
+    provider: includeStructured ? { sort: 'throughput', require_parameters: true } : { sort: 'throughput' },
   };
   if (includeReasoning) body.reasoning = { effort: 'minimal' };
+  if (includeStructured && opts.responseSchema) {
+    body.response_format = {
+      type: 'json_schema',
+      json_schema: { name: opts.responseSchema.name, schema: opts.responseSchema.schema, strict: true },
+    };
+  }
   return body;
 }
 
 async function postChat(apiKey: string, opts: CompletionOptions): Promise<Record<string, unknown>> {
-  for (let attempt = 0; attempt < 2; attempt++) {
-    // First attempt asks to disable reasoning; a rejecting endpoint gets exactly one param-less retry.
+  // Worst case walks three variants: reasoning+schema, schema only, plain. Each rejecting
+  // endpoint quirk is remembered and dropped for the rest of the session.
+  for (let attempt = 0; attempt < 3; attempt++) {
     const includeReasoning = attempt === 0 && !reasoningParamUnsupported;
+    const includeStructured = opts.responseSchema != null && !structuredOutputUnsupported;
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), opts.timeoutMs ?? LIMITS.timeoutMs);
     try {
@@ -56,7 +76,7 @@ async function postChat(apiKey: string, opts: CompletionOptions): Promise<Record
           Authorization: `Bearer ${apiKey}`,
           ...PROVIDER.extraHeaders,
         },
-        body: JSON.stringify(buildBody(opts, includeReasoning)),
+        body: JSON.stringify(buildBody(opts, includeReasoning, includeStructured)),
         signal: controller.signal,
       });
       if (!res.ok) {
@@ -71,6 +91,11 @@ async function postChat(apiKey: string, opts: CompletionOptions): Promise<Record
           reasoningParamUnsupported = true;
           continue;
         }
+        // A schema-rejecting endpoint fails loudly (never silently ignores), so one plain retry restores today's behavior.
+        if (includeStructured && (res.status === 400 || res.status === 404) && STRUCTURED_UNSUPPORTED_RE.test(message)) {
+          structuredOutputUnsupported = true;
+          continue;
+        }
         throw new Error(`OpenRouter request failed (${res.status}): ${message.slice(0, 300)}`);
       }
       return (await res.json()) as Record<string, unknown>;
@@ -78,7 +103,7 @@ async function postChat(apiKey: string, opts: CompletionOptions): Promise<Record
       clearTimeout(timeout);
     }
   }
-  throw new Error('OpenRouter request failed: reasoning-parameter fallback exhausted.');
+  throw new Error('OpenRouter request failed: parameter fallbacks exhausted.');
 }
 
 export async function chatCompletion(apiKey: string, opts: CompletionOptions): Promise<ChatResult> {

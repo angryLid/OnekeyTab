@@ -6,6 +6,10 @@ export interface Config {
   apiKey: string;
   /** Provider model id override; absent/empty = the built-in default in PROVIDERS. */
   model?: string;
+  /** Grouping policy text (the user prompt segment); empty/absent blocks runs until filled or a prefill is picked. */
+  prompt?: string;
+  /** Provenance: id of the built-in prefill the prompt text came from; cleared once the text is edited. */
+  prefillId?: string;
   /** Pre-group dedupe settings; absent in configs stored before the feature existed. */
   dedupe?: DedupeConfig;
   /** StackBridge endpoint settings; absent = built-in defaults. */
@@ -48,6 +52,12 @@ export type ChatMessage = {
 export interface ChatResult {
   content: string;
   model: string;
+}
+
+/** OpenAI-style structured-output spec: request-level JSON schema sent as response_format. */
+export interface ResponseSchemaSpec {
+  name: string;
+  schema: Record<string, unknown>;
 }
 
 export interface ParseResult {

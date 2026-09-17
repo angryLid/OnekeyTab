@@ -48,6 +48,15 @@ export default defineBackground(() => {
       await browser.runtime.openOptionsPage();
       return;
     }
+    // An empty grouping policy blocks exactly like a missing key: the fixed system prompt carries
+    // no policy, so nothing sensible would be sent to the model. The options page is the fix.
+    if (!config.prompt?.trim()) {
+      record.outcome = 'error';
+      record.reason = 'No grouping policy set — pick a prefill or write one in the options.';
+      await persist(record, startedAt);
+      await browser.runtime.openOptionsPage();
+      return;
+    }
 
     inFlight = true;
     await setPending();
@@ -129,7 +138,7 @@ export default defineBackground(() => {
       // if a later call throws (same crash-diagnosability contract as before the extraction).
       const calls: RunCall[] = [];
       record.calls = calls;
-      const { plans, errors } = await requestPlan(chatCompletion, config.apiKey, modelTabs, calls, config.model);
+      const { plans, errors } = await requestPlan(chatCompletion, config.apiKey, modelTabs, calls, config.model, config.prompt);
       if (errors.length > 0) {
         console.warn(`${LOG_PREFIX} Partial issues ignored:`, errors);
       }
